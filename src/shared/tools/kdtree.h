@@ -74,7 +74,7 @@ namespace SPH
         bool setGeometry( const PolygonMesh &polymesh );
         
         /**
-         * Find the "num_closest" nearest neighbors to the query_point, here as Vecd.
+         * Find the "num_closest" nearest neighbors to the query_point, here as Vec3d.
          * Their indices and distances are stored in the provided pointers to
          * array/vector.
          *
@@ -88,13 +88,13 @@ namespace SPH
          * Returns
          * Number `N` of valid points in the result set.
          */
-        int searchKNN(const Vecd &query 
+        int searchKNN(const Vec3d &query 
                     , int knn
                     , std::vector<int> &indices
                     , std::vector<Real> &distance2) const;
 
         /**
-         * Find all the neighbors to query_point, here as Vecd, within a maximum
+         * Find all the neighbors to query_point, here as Vec3d, within a maximum
          * radius. The output is given as a vector of pairs, of which the first
          * element is a point index and the second the corresponding distance.
          * Previous contents of IndicesDists are cleared.
@@ -112,7 +112,7 @@ namespace SPH
          * Returns
          * The number of points within the given radius (i.e. indices.size() or dists.size() )
          */
-        int searchRadius(const Vecd &query
+        int searchRadius(const Vec3d &query
                         , Real radius
                         , std::vector<int> &indices
                         , std::vector<Real> &distance2) const;
@@ -125,7 +125,7 @@ namespace SPH
          * Returns
          * Number `N` of valid points in the result set.
          */
-        int searchHybrid(const Vecd &query
+        int searchHybrid(const Vec3d &query
                         , double radius
                         , int max_nn
                         , std::vector<int> &indices

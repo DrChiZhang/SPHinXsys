@@ -24,8 +24,8 @@
 #ifndef POLYGON_MESH_H
 #define POLYGON_MESH_H
 
-#include "data_type.h"
-#include "array.h"
+#include "base_data_type.h"
+#include "large_data_containers.h"
 
 #include <xml_parser.h>
 #include "kdtree.h"
@@ -56,18 +56,18 @@ namespace SPH
         KDTree* kdtree_;
 	protected:
         StdLargeVec<Vec2d> vertex_textures_;
-        StdLargeVec<Vecd> vertex_normals_;
+        StdLargeVec<Vec3d> vertex_normals_;
 
-        StdLargeVec<Veci> triangles_;
-        StdLargeVec<Veci> triangle_texture_id_;
-        StdLargeVec<Veci> triangle_normal_id_;
-        StdLargeVec<Vecd> triangle_normals_;
+        StdLargeVec<Array3i> triangles_;
+        StdLargeVec<Array3i> triangle_texture_id_;
+        StdLargeVec<Array3i> triangle_normal_id_;
+        StdLargeVec<Vec3d> triangle_normals_;
 
         bool has_vetex_texture_ = false;
         bool has_vertex_normal_  = false;
 
     public:
-        StdLargeVec<Vecd> vertices_;
+        StdLargeVec<Vec3d> vertices_;
 
 	public:
 		/** Default Constructor.  */
@@ -103,9 +103,9 @@ namespace SPH
          * Parameters
          * [in]	    vertex_idex	Vertex idex. 
          * Returns
-         * Vecd Vertex postion.  
+         * Vec3d Vertex postion.  
         */
-        Vecd getVertexPosition(int vertex_idex) const
+        Vec3d getVertexPosition(int vertex_idex) const
         {
             assert(0 <= vertex_idex && vertex_idex < NumVertices());
             return vertices_[vertex_idex];
@@ -128,7 +128,7 @@ namespace SPH
          * Parameters
          * [in]	    translation	Translation parameter.  
         */
-        void translateMesh( const Vecd translation ) 
+        void translateMesh( const Vec3d translation ) 
         {
             int num_vertices = NumVertices();
             for (int i = 0; i != num_vertices; i++)
@@ -274,7 +274,7 @@ namespace SPH
          * Returns
          * The point on the surtriangle of the object which is closest to the given point. 
          */
-        Vecd findNearestPoint( const Vecd &position, Vecd &normal, bool &inside ); 	
+        Vec3d findNearestPoint( const Vec3d &position, Vec3d &normal, bool &inside ); 	
 
         /** 
          * Given a point, check the given point is inside or outside the object presented by the Obj file.
@@ -283,7 +283,7 @@ namespace SPH
          * Returns
          * TRUE or FALSE, inside or not. 
          */
-        bool isInside( 	const Vecd &position );
+        bool isInside( 	const Vec3d &position );
 
         /** 
          * Given a point, calculate the distance between the point in space and a triangle.
@@ -296,7 +296,7 @@ namespace SPH
          * Returns
          * The nearest point on the face. 
          */
-        inline Vecd findNearestPointToTriangle( const Vecd &position, int face); 
+        inline Vec3d findNearestPointToTriangle( const Vec3d &position, int face); 
 
         /** 
          * Gcreate a sphere mesh. 
@@ -382,7 +382,7 @@ namespace SPH
                 std::istringstream v_ss( line.substr( line.find("v") + 1 ) );
                 Real x, y, z;
                 v_ss >> x; v_ss >> y; v_ss >> z;
-                vertices_.push_back( Vecd( x, y, z ) );
+                vertices_.push_back( Vec3d( x, y, z ) );
 			} 
             else if( type_str == "vt" )
             {
@@ -397,14 +397,14 @@ namespace SPH
                 std::istringstream vn_ss( line.substr( line.find("vn") + 2 ) );
                 Real n_x, n_y, n_z;
                 vn_ss >> n_x; vn_ss >> n_y; vn_ss >> n_z;
-                vertex_normals_.push_back( Vecd( n_x, n_y, n_z ) );       
+                vertex_normals_.push_back( Vec3d( n_x, n_y, n_z ) );       
                 has_vertex_normal_ = true;        
             } 
             else if( type_str == "f" )
             {
-                Veci triangle = Veci::Zero();
-                Veci triangle_normal = Veci::Zero();
-                Veci triangle_texture = Veci::Zero();
+                Array3i triangle = Array3i::Zero();
+                Array3i triangle_normal = Array3i::Zero();
+                Array3i triangle_texture = Array3i::Zero();
                 std::string parse_str = line.substr( line.find("f") + 1 );
 
                 if( has_vetex_texture_ && has_vertex_normal_ )
@@ -549,16 +549,16 @@ namespace SPH
      * Returns
      * The nearest point on the face. 
      */
-    inline Vecd PolygonMesh::findNearestPointToTriangle( const Vecd &position, int face)
+    inline Vec3d PolygonMesh::findNearestPointToTriangle( const Vec3d &position, int face)
     {
         const auto &triangle = triangles_[face];
-        const Vecd& vert1 = vertices_[triangle(0)];
-        const Vecd& vert2 = vertices_[triangle(1)];
-        const Vecd& vert3 = vertices_[triangle(2)];
+        const Vec3d& vert1 = vertices_[triangle(0)];
+        const Vec3d& vert2 = vertices_[triangle(1)];
+        const Vec3d& vert3 = vertices_[triangle(2)];
 
-        const Vecd e0 = vert2 - vert1;
-        const Vecd e1 = vert3 - vert1;
-        const Vecd delta = vert1 - position;
+        const Vec3d e0 = vert2 - vert1;
+        const Vec3d e1 = vert3 - vert1;
+        const Vec3d delta = vert1 - position;
         
         const Real a = e0.squaredNorm();
         const Real b = e0.dot( e1 );

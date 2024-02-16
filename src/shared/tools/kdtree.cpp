@@ -6,7 +6,7 @@ namespace SPH
 {
     //=================================================================================================//
     int KDTree::searchKNN(
-        const Vecd &query 
+        const Vec3d &query 
         , int knn
         , std::vector<int> &indices
         , std::vector<Real> &distance2) const
@@ -25,7 +25,7 @@ namespace SPH
     }
     //=================================================================================================//
     int KDTree::searchRadius(
-        const Vecd &query
+        const Vec3d &query
         , Real radius
         , std::vector<int> &indices
         , std::vector<Real> &distance2) const 
@@ -47,7 +47,7 @@ namespace SPH
     }
     //=================================================================================================//
     int KDTree::searchHybrid(
-        const Vecd &query
+        const Vec3d &query
         , double radius
         , int max_nn
         , std::vector<int> &indices

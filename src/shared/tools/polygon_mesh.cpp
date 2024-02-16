@@ -198,7 +198,7 @@ namespace SPH
             triangle_normals_[i].normalize();
             if ( std::isnan( triangle_normals_[i](0) ) ) 
             {
-                triangle_normals_[i] = Vecd::Identity();
+                triangle_normals_[i] = Vec3d::Identity();
             }
         }
     }
@@ -210,8 +210,8 @@ namespace SPH
         for ( size_t i = 0; i < Numtriangles(); i++ ) 
         {
             auto &triangle = triangles_[i];
-            Vecd v01 = vertices_[triangle(1)] - vertices_[triangle(0)];
-            Vecd v02 = vertices_[triangle(2)] - vertices_[triangle(0)];
+            Vec3d v01 = vertices_[triangle(1)] - vertices_[triangle(0)];
+            Vec3d v02 = vertices_[triangle(2)] - vertices_[triangle(0)];
             triangle_normals_[i] = v01.cross(v02);
         }
 
@@ -227,8 +227,8 @@ namespace SPH
 
         if( !has_vertex_normal_ )
         {
-            vertex_normals_.resize( vertices_.size(), Vecd::Zero() );
-            triangle_normal_id_.resize( triangles_.size(), Veci::Zero() );
+            vertex_normals_.resize( vertices_.size(), Vec3d::Zero() );
+            triangle_normal_id_.resize( triangles_.size(), Array3i::Zero() );
 
             for ( size_t i = 0; i < triangles_.size(); i++ ) 
             {
@@ -236,7 +236,7 @@ namespace SPH
                 vertex_normals_[triangle(0)] += triangle_normals_[i];
                 vertex_normals_[triangle(1)] += triangle_normals_[i];
                 vertex_normals_[triangle(2)] += triangle_normals_[i];
-                triangle_normal_id_[i] = Veci( triangle(0), triangle(1), triangle(2) );
+                triangle_normal_id_[i] = Array3i( triangle(0), triangle(1), triangle(2) );
             }
 
             has_vertex_normal_ = true;            
@@ -261,10 +261,10 @@ namespace SPH
         return triangles;
     }
     //=================================================================================================//
-    Vecd PolygonMesh::findNearestPoint( 	const Vecd &position, Vecd &normal, bool &inside )
+    Vec3d PolygonMesh::findNearestPoint( 	const Vec3d &position, Vec3d &normal, bool &inside )
     {
         Real distance = MaxRealNumber;
-        Vecd nearestpoint = Vecd::Zero();
+        Vec3d nearestpoint = Vec3d::Zero();
         int face; 
 
         int knn = 1;
@@ -281,7 +281,7 @@ namespace SPH
             {
                 int tidx = triangles[j];
                 const auto &triangle = triangles_[tidx];
-                Vecd p_find = findNearestPointToTriangle( position, tidx );
+                Vec3d p_find = findNearestPointToTriangle( position, tidx );
                 Real dist = ( p_find - position ).squaredNorm();
 
                 if ( dist < distance ) 
@@ -293,17 +293,17 @@ namespace SPH
             }
         }
 
-        Vecd delta = position-nearestpoint;
+        Vec3d delta = position-nearestpoint;
         inside = ( delta.dot( triangle_normals_[face] ) < 0 );
         
         return nearestpoint;
     }
     //=================================================================================================//
-    bool PolygonMesh::isInside( 	const Vecd &position )
+    bool PolygonMesh::isInside( 	const Vec3d &position )
     {
-        Vecd norm = Vecd::Zero();
+        Vec3d norm = Vec3d::Zero();
         bool is_inside = false;
-        Vecd nearestpoint = findNearestPoint( position, norm, is_inside);
+        Vec3d nearestpoint = findNearestPoint( position, norm, is_inside);
  
         return is_inside;
     }
@@ -325,8 +325,8 @@ namespace SPH
 
         mesh->vertices_.resize( 2 * resolution * (resolution - 1) + 2 );
 
-        mesh->vertices_[0] = Vecd( 0.0, 0.0,  radius );
-        mesh->vertices_[1] = Vecd( 0.0, 0.0, -radius );
+        mesh->vertices_[0] = Vec3d( 0.0, 0.0,  radius );
+        mesh->vertices_[1] = Vec3d( 0.0, 0.0, -radius );
 
         Real step = M_PI / (Real)resolution;
         for ( int i = 1; i < resolution; i++ ) 
@@ -338,7 +338,7 @@ namespace SPH
             {
                 Real theta = step * j;
                 mesh->vertices_[base + j] = radius *
-                    Vecd( sin(alpha) * cos(theta), sin(alpha) * sin(theta), cos(alpha) );
+                    Vec3d( sin(alpha) * cos(theta), sin(alpha) * sin(theta), cos(alpha) );
             }
         }
 
@@ -347,9 +347,9 @@ namespace SPH
         {
             int j1 = ( j + 1 ) % ( 2 * resolution );
             int base = 2;
-            mesh->triangles_.push_back( Veci(0, base + j, base + j1) );
+            mesh->triangles_.push_back( Array3i(0, base + j, base + j1) );
             base = 2 + 2 * resolution * ( resolution - 2 );
-            mesh->triangles_.push_back( Veci(1, base + j1, base + j) );
+            mesh->triangles_.push_back( Array3i(1, base + j1, base + j) );
         }
 
         // Triangles for non-polar region.
@@ -360,8 +360,8 @@ namespace SPH
             for ( int j = 0; j < 2 * resolution; j++ ) 
             {
                 int j1 = ( j + 1 ) % ( 2 * resolution );
-                mesh->triangles_.push_back( Veci(base2 + j, base1 + j1, base1 + j) );
-                mesh->triangles_.push_back( Veci(base2 + j, base2 + j1, base1 + j1));
+                mesh->triangles_.push_back( Array3i(base2 + j, base1 + j1, base1 + j) );
+                mesh->triangles_.push_back( Array3i(base2 + j, base2 + j1, base1 + j1));
             }
         }
 
@@ -398,14 +398,14 @@ namespace SPH
 
         // Vertices.
         mesh->vertices_.resize(8);
-        mesh->vertices_[0] = Vecd( 0.0, 0.0, 0.0 );
-        mesh->vertices_[1] = Vecd( width, 0.0, 0.0 );
-        mesh->vertices_[2] = Vecd( 0.0, 0.0, depth );
-        mesh->vertices_[3] = Vecd( width, 0.0, depth );
-        mesh->vertices_[4] = Vecd( 0.0, height, 0.0 );
-        mesh->vertices_[5] = Vecd( width, height, 0.0 );
-        mesh->vertices_[6] = Vecd( 0.0, height, depth );
-        mesh->vertices_[7] = Vecd( width, height, depth );
+        mesh->vertices_[0] = Vec3d( 0.0, 0.0, 0.0 );
+        mesh->vertices_[1] = Vec3d( width, 0.0, 0.0 );
+        mesh->vertices_[2] = Vec3d( 0.0, 0.0, depth );
+        mesh->vertices_[3] = Vec3d( width, 0.0, depth );
+        mesh->vertices_[4] = Vec3d( 0.0, height, 0.0 );
+        mesh->vertices_[5] = Vec3d( width, height, 0.0 );
+        mesh->vertices_[6] = Vec3d( 0.0, height, depth );
+        mesh->vertices_[7] = Vec3d( width, height, depth );
 
         // Triangles.
         mesh->triangles_ = {{4, 7, 5}, {4, 6, 7}, {0, 2, 4}, {2, 6, 4},
@@ -448,8 +448,8 @@ namespace SPH
         }
 
         mesh->vertices_.resize( resolution * (split + 1) + 2 );
-        mesh->vertices_[0] = Vecd( 0.0, 0.0, height * 0.5 );
-        mesh->vertices_[1] = Vecd( 0.0, 0.0, -height * 0.5 );
+        mesh->vertices_[0] = Vec3d( 0.0, 0.0, height * 0.5 );
+        mesh->vertices_[1] = Vec3d( 0.0, 0.0, -height * 0.5 );
         Real step = M_PI * 2.0 / (Real)resolution;
         Real h_step = height / (Real)split;
         for ( int i = 0; i <= split; i++ ) 
@@ -458,7 +458,7 @@ namespace SPH
             {
                 Real theta = step * j;
                 mesh->vertices_[2 + resolution * i + j] =
-                            Vecd( cos(theta) * radius, 
+                            Vec3d( cos(theta) * radius, 
                                   sin(theta) * radius,
                                   height * 0.5 - h_step * i );
             }
@@ -469,9 +469,9 @@ namespace SPH
         {
             int j1 = (j + 1) % resolution;
             int base = 2;
-            mesh->triangles_.push_back( Veci(0, base + j, base + j1) );
+            mesh->triangles_.push_back( Array3i(0, base + j, base + j1) );
             base = 2 + resolution * split;
-            mesh->triangles_.push_back( Veci(1, base + j1, base + j) );
+            mesh->triangles_.push_back( Array3i(1, base + j1, base + j) );
         }
 
         // Triangles for cylindrical surface.
@@ -482,8 +482,8 @@ namespace SPH
             for ( int j = 0; j < resolution; j++ ) 
             {
                 int j1 = (j + 1) % resolution;
-                mesh->triangles_.push_back( Veci(base2 + j, base1 + j1, base1 + j) );
-                mesh->triangles_.push_back( Veci(base2 + j, base2 + j1, base1 + j1) );
+                mesh->triangles_.push_back( Array3i(base2 + j, base1 + j1, base1 + j) );
+                mesh->triangles_.push_back( Array3i(base2 + j, base2 + j1, base1 + j1) );
             }
         }
 
@@ -524,8 +524,8 @@ namespace SPH
 
         mesh->vertices_.resize(resolution * split + 2);
 
-        mesh->vertices_[0] = Vecd( 0.0, 0.0, 0.0 );
-        mesh->vertices_[1] = Vecd( 0.0, 0.0, height );
+        mesh->vertices_[0] = Vec3d( 0.0, 0.0, 0.0 );
+        mesh->vertices_[1] = Vec3d( 0.0, 0.0, height );
 
         Real step = M_PI * 2.0 / (Real)resolution;
         Real h_step = height / (Real)split;
@@ -539,7 +539,7 @@ namespace SPH
             for ( int j = 0; j < resolution; j++ ) 
             {
                 Real theta = step * j;
-                mesh->vertices_[base + j] = Vecd( cos(theta) * r, sin(theta) * r, h_step * i );
+                mesh->vertices_[base + j] = Vec3d( cos(theta) * r, sin(theta) * r, h_step * i );
             }
         }
 
@@ -548,11 +548,11 @@ namespace SPH
             int j1 = ( j + 1 ) % resolution;
             // Triangles for bottom surface.
             int base = 2;
-            mesh->triangles_.push_back( Veci(0, base + j1, base + j) );
+            mesh->triangles_.push_back( Array3i(0, base + j1, base + j) );
 
             // Triangles for top segment of conical surface.
             base = 2 + resolution * ( split - 1 );
-            mesh->triangles_.push_back( Veci(1, base + j, base + j1) );
+            mesh->triangles_.push_back( Array3i(1, base + j, base + j1) );
         }
 
         // Triangles for conical surface other than top-segment.
@@ -563,8 +563,8 @@ namespace SPH
             for ( int j = 0; j < resolution; j++ ) 
             {
                 int j1 = ( j + 1 ) % resolution;
-                mesh->triangles_.push_back( Veci(base2 + j1, base1 + j, base1 + j1) );
-                mesh->triangles_.push_back( Veci(base2 + j1, base2 + j, base1 + j) );
+                mesh->triangles_.push_back( Array3i(base2 + j1, base1 + j, base1 + j1) );
+                mesh->triangles_.push_back( Array3i(base2 + j1, base2 + j, base1 + j) );
             }
         }
 
