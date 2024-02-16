@@ -85,7 +85,10 @@ TEST(test_poly_mesh, test_find_nearest_point_bunny)
 	Real dist = ( nearestpoint - point ).squaredNorm();
 	bool is_written = poly_mesh.writeFile( "output/bunny.obj" );
 
+	EXPECT_EQ( 1.0, dist );
+	ASSERT_TRUE( is_loaded );
 	ASSERT_TRUE( inside );
+	ASSERT_TRUE( is_written );
 }
 
 int main(int argc, char* argv[])

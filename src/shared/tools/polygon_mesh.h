@@ -50,6 +50,22 @@ namespace fs = std::filesystem;
 
 namespace SPH
 {
+    inline std::vector<std::string> tokenize(const std::string& str, const std::string& delimiters = " ")
+    {
+        std::vector<std::string> tokens; 
+
+        std::string::size_type lastPos = str.find_first_not_of(delimiters, 0);
+        std::string::size_type pos = str.find_first_of(delimiters, lastPos);
+
+        while (std::string::npos != pos || std::string::npos != lastPos)
+        {
+            tokens.push_back(str.substr(lastPos, pos - lastPos));
+            lastPos = str.find_first_not_of(delimiters, pos);
+            pos = str.find_first_of(delimiters, lastPos);
+        }
+
+        return tokens;
+    }
     /**
 	 * @class   PolygonMesh 
 	 * @note    The PolygonMesh contains a class of format paser, e.g. stl, obj and  vtp. 
@@ -94,14 +110,14 @@ namespace SPH
          * Returns
          * int Number of vertices. 
         */
-        int NumVertices() const{ return vertices_.size(); }
+        size_t NumVertices() const{ return vertices_.size(); }
 
         /** 
          * Get the number of triangles parsered in the given file. 
          * Returns
          * int Number of triangles. 
         */
-        int Numtriangles() const { return triangles_.size();}
+        size_t Numtriangles() const { return triangles_.size();}
 
         /** 
          * Get the specifed vertices parsered in the given file. 
@@ -123,8 +139,8 @@ namespace SPH
         */
         void scaleMesh( const Real scale) 
         {
-            int num_vertices = NumVertices();
-            for (int i = 0; i != num_vertices; i++)
+            size_t num_vertices = NumVertices();
+            for (size_t i = 0; i != num_vertices; i++)
                 vertices_[i] *= scale;
         }
 
@@ -135,8 +151,8 @@ namespace SPH
         */
         void translateMesh( const Vec3d translation ) 
         {
-            int num_vertices = NumVertices();
-            for (int i = 0; i != num_vertices; i++)
+            size_t num_vertices = NumVertices();
+            for (size_t i = 0; i != num_vertices; i++)
                 vertices_[i] += translation;
         }
 
@@ -147,9 +163,9 @@ namespace SPH
         */
         void transformMesh( const Transform &transform )
         {
-            int num_vertices = NumVertices();
-            for (int i = 0; i != num_vertices; i++)
-                vertices_[i] = transform * vertices_[i];         
+            // int num_vertices = NumVertices();
+            // for (int i = 0; i != num_vertices; i++)
+            //     vertices_[i] = transform * vertices_[i];         
         } 	
 
         /** 
@@ -570,7 +586,7 @@ namespace SPH
         const Real c = e1.squaredNorm();
         const Real d = e0.dot( delta );
         const Real e = e1.dot( delta );
-        const Real f = delta.squaredNorm();
+        //const Real f = delta.squaredNorm();
         const Real det = a * c - b * b;
 
         Real s = b * e - c * d;

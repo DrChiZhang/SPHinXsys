@@ -130,19 +130,19 @@ namespace SPH
     {
         std::ofstream ofs( pathname );
 
-        int num_vertices = NumVertices();
-        for (int i = 0; i != num_vertices; i++)
+        size_t num_vertices = NumVertices();
+        for (size_t i = 0; i != num_vertices; i++)
             ofs << "v " << vertices_[i][0] << " " << vertices_[i][1] << " " <<  vertices_[i][2] << "\n";
   
-        for (int i = 0; i != vertex_textures_.size(); i++)
+        for (size_t i = 0; i != vertex_textures_.size(); i++)
             ofs << "vt " << vertex_textures_[i][0] << " " << vertex_textures_[i][1] << "\n";
 
-        for (int i = 0; i != vertex_normals_.size(); i++)
+        for (size_t i = 0; i != vertex_normals_.size(); i++)
             ofs << "vn " << vertex_normals_[i][0] << " " << vertex_normals_[i][1] << " " <<  vertex_normals_[i][2] << "\n";
             
 
-        int num_triangle = Numtriangles();
-        for (int i = 0; i != num_triangle; i++)
+        size_t num_triangle = Numtriangles();
+        for (size_t i = 0; i != num_triangle; i++)
         {
             if( has_vetex_texture_ && has_vertex_normal_ )
             {
@@ -251,7 +251,7 @@ namespace SPH
     std::vector<int> PolygonMesh::findTriangles(const int & vidx)
     {
         std::vector<int> triangles;
-        for ( int i = 0; i < triangles_.size(); i++ )  
+        for ( size_t i = 0; i < triangles_.size(); i++ )  
         {
             const auto &triangle = triangles_[i];
             if ( triangle(0) == vidx || triangle(1) == vidx  || triangle(2) == vidx )
@@ -263,9 +263,9 @@ namespace SPH
     //=================================================================================================//
     Vec3d PolygonMesh::findNearestPoint( 	const Vec3d &position, Vec3d &normal, bool &inside )
     {
-        Real distance = MaxRealNumber;
+        Real distance = MaxReal;
         Vec3d nearestpoint = Vec3d::Zero();
-        int face; 
+        int face = 0; 
 
         int knn = 1;
         std::vector<int> indices;
@@ -277,10 +277,10 @@ namespace SPH
         for (int i = 0; i < result; i++)
         {
             std::vector<int> triangles = findTriangles( indices[i] );
-            for ( int j = 0; j < triangles.size(); j++ )
+            for ( size_t j = 0; j < triangles.size(); j++ )
             {
                 int tidx = triangles[j];
-                const auto &triangle = triangles_[tidx];
+                //const auto &triangle = triangles_[tidx];
                 Vec3d p_find = findNearestPointToTriangle( position, tidx );
                 Real dist = ( p_find - position ).squaredNorm();
 
@@ -299,11 +299,40 @@ namespace SPH
         return nearestpoint;
     }
     //=================================================================================================//
-    bool PolygonMesh::isInside( 	const Vec3d &position )
+    bool PolygonMesh::isInside( const Vec3d &position )
     {
-        Vec3d norm = Vec3d::Zero();
-        bool is_inside = false;
-        Vec3d nearestpoint = findNearestPoint( position, norm, is_inside);
+        Real distance = MaxReal;
+        Vec3d nearestpoint = Vec3d::Zero();
+        int face = 0; 
+
+        int knn = 1;
+        std::vector<int> indices;
+        std::vector<Real> distances;
+
+        int result = kdtree_->searchKNN(position, knn, indices, distances);
+
+        std::vector<int> triangles;
+        for (int i = 0; i < result; i++)
+        {
+            std::vector<int> triangles = findTriangles( indices[i] );
+            for ( size_t j = 0; j < triangles.size(); j++ )
+            {
+                int tidx = triangles[j];
+                //const auto &triangle = triangles_[tidx];
+                Vec3d p_find = findNearestPointToTriangle( position, tidx );
+                Real dist = ( p_find - position ).squaredNorm();
+
+                if ( dist < distance ) 
+                {
+                    nearestpoint = p_find;
+                    distance = dist;
+                    face = tidx;
+                }
+            }
+        }
+
+        Vec3d delta = position-nearestpoint;
+        bool is_inside = ( delta.dot( triangle_normals_[face] ) < 0 );
  
         return is_inside;
     }
