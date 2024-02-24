@@ -327,7 +327,7 @@ namespace SPH
          * Return 
          * PolygonMesh* SmartPointer to the generated mesh. 
          */
-        std::shared_ptr<PolygonMesh> createSphere(
+        static std::shared_ptr<PolygonMesh> createSphere(
               Real radius = 1.0
             , int resolution = 20);
 
@@ -342,7 +342,7 @@ namespace SPH
          * Return 
          * PolygonMesh* SmartPointer to the generated mesh. 
          */
-        std::shared_ptr<PolygonMesh> createBox(
+        static std::shared_ptr<PolygonMesh> createBox(
               Real width = 1.0
             , Real height = 1.0
             , Real depth = 1.0
@@ -358,7 +358,7 @@ namespace SPH
          * Return 
          * PolygonMesh* SmartPointer to the generated mesh. 
          */
-        std::shared_ptr<PolygonMesh> createCylinder(
+        static std::shared_ptr<PolygonMesh> createCylinder(
               Real radius = 1.0
             , Real height = 2.0
             , int resolution = 20
@@ -374,7 +374,7 @@ namespace SPH
          * Return 
          * PolygonMesh* SmartPointer to the generated mesh. 
          */
-        std::shared_ptr<PolygonMesh> createCone(
+        static std::shared_ptr<PolygonMesh> createCone(
               Real radius = 1.0
             , Real height = 2.0
             , int resolution = 20

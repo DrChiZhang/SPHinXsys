@@ -31,6 +31,7 @@
 #define TRIANGULAR_MESH_SHAPE_H
 
 #include "all_simbody.h"
+#include "polygon_mesh.h"
 #include "base_geometry.h"
 
 #include <filesystem>
@@ -52,14 +53,16 @@ class TriangleMeshShape : public Shape
 
   public:
     explicit TriangleMeshShape(const std::string &shape_name, const SimTK::PolygonalMesh *mesh = nullptr)
-        : Shape(shape_name), triangle_mesh_(nullptr)
+        : Shape(shape_name)
+        , triangle_mesh_(nullptr)
     {
         if (mesh)
             triangle_mesh_ = generateTriangleMesh(*mesh);
     };
     /** Only reliable when the probe point is close to the shape surface.
      * Need to be combined with level set shape and sign correction to avoid artifacts
-     * when probe distance is far from the surface. */
+     * when probe distance is far from the surface. 
+     */
     virtual bool checkContain(const Vec3d &probe_point, bool BOUNDARY_INCLUDED = true) override;
     virtual Vec3d findClosestPoint(const Vec3d &probe_point) override;
 
