@@ -12,9 +12,10 @@
 * copy of the License at http://www.apache.org/licenses/LICENSE-2.0.        *
 *                                                                           *
 * --------------------------------------------------------------------------*/
+/**
 * @file 	sph_system_module.cpp
-* @brief 	Python binding for SPH_System in SPHinxsys library.
-* @author	Chi ZHang
+* @brief 	Python binding of SPH_System in SPHinxsys library.
+* @author	Chi ZHANG
 * @version  1.0 
 *			Start the python binding work.
 *			-- Chi ZHANG

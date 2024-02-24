@@ -3,8 +3,7 @@
 # --------------------------------------------------------------------------#
 # pySPHinXsys provides a python binding for SPHinXsys library.				#
 #																			#
-# Portions copyright (c) 2017-2024 The authors and		                    #
-# the authors' affiliations.												#
+# Copyright(c) 2017-2024 The authors and the authors' affiliations.         #
 #                                                                           #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may   #
 # not use this file except in compliance with the License. You may obtain a #
@@ -13,7 +12,7 @@
 # --------------------------------------------------------------------------#
 # @file 	setup.py
 # @brief 	Setup for pySPHinXsys stallation. 
-# @author	Chi ZHang
+# @author	Chi ZHANG
 # @version  1.0 
 #			Try to implement pybind for SPHinXsys library. 
 #			-- Chi ZHANG
