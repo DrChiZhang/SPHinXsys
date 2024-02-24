@@ -8,7 +8,8 @@ include(Common) # brings macro to current namespace
 # ------ Options
 option(SPHINXSYS_2D "Build sphinxsys_2d library" ON)
 option(SPHINXSYS_3D "Build sphinxsys_3d library" ON)
-option(SPHINXSYS_BUILD_TESTS "Build tests" ON)
+option(SPHINXSYS_2D "Build sphinxsys_2d library" ON)
+option(PYSPHINXSYS_BUILD "Build pybind tests" ON)
 option(TEST_STATE_RECORDING "State recording when run Ctest" ON)
 option(SPHINXSYS_DEVELOPER_MODE "Developer mode has more flags active for code quality" ON)
 option(SPHINXSYS_USE_FLOAT "Build using float (single-precision floating-point format) as primary type" OFF)
@@ -101,6 +102,10 @@ endif()
 # ------ Setup the concrete libraries
 add_subdirectory(src)
 add_subdirectory(modules)
+
+if(PYSPHINXSYS_BUILD)
+    add_subdirectory(pySPHinXsys)
+endif()
 
 # ------ Setup the tests
 if(SPHINXSYS_BUILD_TESTS)
