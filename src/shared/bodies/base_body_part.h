@@ -45,15 +45,23 @@ class BodyPart
 {
   public:
     BodyPart(SPHBody &sph_body, const std::string &body_part_name)
-        : sph_body_(sph_body), body_part_name_(body_part_name){};
+        : sph_body_(sph_body), part_id_(sph_body.getNewBodyPartID()),
+          body_part_name_(body_part_name),
+          base_particles_(sph_body.getBaseParticles()),
+          pos_(base_particles_.getVariableDataByName<Vecd>("Position")){};
     virtual ~BodyPart(){};
 
     SPHBody &getSPHBody() { return sph_body_; };
+    SPHSystem &getSPHSystem() { return sph_body_.getSPHSystem(); };
     std::string getName() { return body_part_name_; };
+    int getPartID() { return part_id_; };
 
   protected:
     SPHBody &sph_body_;
+    int part_id_;
     std::string body_part_name_;
+    BaseParticles &base_particles_;
+    Vecd *pos_;
 };
 
 /**
@@ -69,7 +77,7 @@ class BodyPartByParticle : public BodyPart
     size_t SizeOfLoopRange() { return body_part_particles_.size(); };
 
     BodyPartByParticle(SPHBody &sph_body, const std::string &body_part_name)
-        : BodyPart(sph_body, body_part_name), base_particles_(sph_body.getBaseParticles()),
+        : BodyPart(sph_body, body_part_name),
           body_part_bounds_(Vecd::Zero(), Vecd::Zero()), body_part_bounds_set_(false){};
     virtual ~BodyPartByParticle(){};
 
@@ -87,7 +95,6 @@ class BodyPartByParticle : public BodyPart
     }
 
   protected:
-    BaseParticles &base_particles_;
     BoundingBox body_part_bounds_;
     bool body_part_bounds_set_;
 
@@ -126,11 +133,12 @@ class BodyRegionByParticle : public BodyPartByParticle
     SharedPtrKeeper<Shape> shape_ptr_keeper_;
 
   public:
+    BodyRegionByParticle(SPHBody &sph_body, Shape &body_part_shape);
     BodyRegionByParticle(SPHBody &sph_body, SharedPtr<Shape> shape_ptr);
     virtual ~BodyRegionByParticle(){};
     Shape &getBodyPartShape() { return body_part_shape_; };
 
-  private:
+  protected:
     Shape &body_part_shape_;
     void tagByContain(size_t particle_index);
 };
@@ -145,7 +153,7 @@ class BodySurface : public BodyPartByParticle
     explicit BodySurface(SPHBody &sph_body);
     virtual ~BodySurface(){};
 
-  private:
+  protected:
     Real particle_spacing_min_;
     void tagNearSurface(size_t particle_index);
 };
@@ -175,6 +183,7 @@ class BodyRegionByCell : public BodyPartByCell
     SharedPtrKeeper<Shape> shape_ptr_keeper_;
 
   public:
+    BodyRegionByCell(RealBody &real_body, Shape &body_part_shape);
     BodyRegionByCell(RealBody &real_body, SharedPtr<Shape> shape_ptr);
     virtual ~BodyRegionByCell(){};
     Shape &getBodyPartShape() { return body_part_shape_; };
@@ -217,11 +226,15 @@ template <class BodyRegionType>
 class AlignedBoxRegion : public BodyRegionType
 {
   public:
-    AlignedBoxShape &aligned_box_;
-
+    AlignedBoxRegion(RealBody &real_body, AlignedBoxShape &aligned_box)
+        : BodyRegionType(real_body, aligned_box), aligned_box_(aligned_box){};
     AlignedBoxRegion(RealBody &real_body, SharedPtr<AlignedBoxShape> aligned_box_ptr)
         : BodyRegionType(real_body, aligned_box_ptr), aligned_box_(*aligned_box_ptr.get()){};
     virtual ~AlignedBoxRegion(){};
+    AlignedBoxShape &getAlignedBoxShape() { return aligned_box_; };
+
+  protected:
+    AlignedBoxShape &aligned_box_;
 };
 
 using BodyAlignedBoxByParticle = AlignedBoxRegion<BodyRegionByParticle>;

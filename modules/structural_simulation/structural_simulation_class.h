@@ -80,7 +80,7 @@ class SolidBodyFromMesh : public SolidBody
 {
   public:
     SolidBodyFromMesh(SPHSystem &system, SharedPtr<TriangleMeshShape> triangle_mesh_shape, Real resolution,
-                      SharedPtr<SaintVenantKirchhoffSolid> material_model, StdLargeVec<Vec3d> &pos_0, StdLargeVec<Real> &volume);
+                      SharedPtr<SaintVenantKirchhoffSolid> material_model, Vec3d *pos_0, Real *volume);
     ~SolidBodyFromMesh(){};
 };
 
@@ -91,34 +91,34 @@ class SolidBodyForSimulation
     InnerRelation inner_body_relation_;
 
     SimpleDynamics<NormalDirectionFromBodyShape> initial_normal_direction_;
-    InteractionWithUpdate<KernelCorrectionMatrixInner> correct_configuration_;
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> correct_configuration_;
     Dynamics1Level<solid_dynamics::Integration1stHalfPK2> stress_relaxation_first_half_;
     Dynamics1Level<solid_dynamics::Integration2ndHalf> stress_relaxation_second_half_;
-    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vec3d>>> damping_random_;
+    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vec3d, FixedDampingRate>>> damping_random_;
 
   public:
     // no particle reload --> direct generator
     SolidBodyForSimulation(
         SPHSystem &system, SharedPtr<TriangleMeshShape> triangle_mesh_shape, Real resolution,
-        Real physical_viscosity, SharedPtr<SaintVenantKirchhoffSolid> material_model, StdLargeVec<Vec3d> &pos_0, StdLargeVec<Real> &volume);
+        Real physical_viscosity, SharedPtr<SaintVenantKirchhoffSolid> material_model, Vec3d *pos_0, Real *volume);
     ~SolidBodyForSimulation(){};
 
     SolidBodyFromMesh *getSolidBodyFromMesh() { return &solid_body_from_mesh_; };
-    ElasticSolidParticles *getElasticSolidParticles() { return DynamicCast<ElasticSolidParticles>(this, &solid_body_from_mesh_.getBaseParticles()); };
+    BaseParticles *getElasticSolidParticles() { return DynamicCast<BaseParticles>(this, &solid_body_from_mesh_.getBaseParticles()); };
     InnerRelation *getInnerBodyRelation() { return &inner_body_relation_; };
 
     SimpleDynamics<NormalDirectionFromBodyShape> *getInitialNormalDirection() { return &initial_normal_direction_; };
-    InteractionWithUpdate<KernelCorrectionMatrixInner> *getCorrectConfiguration() { return &correct_configuration_; };
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> *getCorrectConfiguration() { return &correct_configuration_; };
     Dynamics1Level<solid_dynamics::Integration1stHalfPK2> *getStressRelaxationFirstHalf() { return &stress_relaxation_first_half_; };
     Dynamics1Level<solid_dynamics::Integration2ndHalf> *getStressRelaxationSecondHalf() { return &stress_relaxation_second_half_; };
-    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vec3d>>> *getDampingWithRandomChoice() { return &damping_random_; };
+    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vec3d, FixedDampingRate>>> *getDampingWithRandomChoice() { return &damping_random_; };
 };
 
 void expandBoundingBox(BoundingBox *original, BoundingBox *additional);
 
 void relaxParticlesSingleResolution(bool write_particles_to_file,
                                     SolidBodyFromMesh &solid_body_from_mesh,
-                                    ElasticSolidParticles &solid_body_from_mesh_particles,
+                                    BaseParticles &solid_body_from_mesh_particles,
                                     InnerRelation &solid_body_from_mesh_inner);
 
 static inline Real getPhysicalViscosityGeneral(Real rho, Real youngs_modulus, Real length_scale, Real shape_constant = 1.0)
@@ -200,17 +200,18 @@ class StructuralSimulation
     SPHSystem system_;
     Real scale_system_boundaries_;
     IOEnvironment io_environment_;
+    Real &physical_time_;
 
     StdVec<SharedPtr<SolidBodyForSimulation>> solid_body_list_;
     StdVec<SharedPtr<SimpleDynamics<solid_dynamics::UpdateElasticNormalDirection>>> particle_normal_update_;
 
     StdVec<SharedPtr<SurfaceContactRelation>> contact_list_;
-    StdVec<SharedPtr<InteractionDynamics<solid_dynamics::ContactDensitySummation>>> contact_density_list_;
+    StdVec<SharedPtr<InteractionDynamics<solid_dynamics::ContactFactorSummation>>> contact_density_list_;
     StdVec<SharedPtr<InteractionDynamics<solid_dynamics::ContactForce>>> contact_force_list_;
 
     // for initializeATimeStep
     StdVec<Gravity> gravity_list_;
-    StdVec<SharedPtr<SimpleDynamics<GravityForce>>> initialize_gravity_;
+    StdVec<SharedPtr<SimpleDynamics<GravityForce<Gravity>>>> initialize_gravity_;
     StdVec<GravityPair> non_zero_gravity_;
     // for ExternalForceInBoundingBox
     StdVec<SharedPtr<SimpleDynamics<solid_dynamics::ExternalForceInBoundingBox>>> force_bounding_box_;
@@ -228,10 +229,10 @@ class StructuralSimulation
     StdVec<SharedPtr<SimpleDynamics<solid_dynamics::SpringNormalOnSurfaceParticles>>> surface_spring_;
     StdVec<SurfaceSpringTuple> surface_spring_tuple_;
     // for ConstrainSolidBody
-    StdVec<SharedPtr<SimpleDynamics<solid_dynamics::FixBodyConstraint>>> fixed_constraint_body_;
+    StdVec<SharedPtr<SimpleDynamics<FixBodyConstraint>>> fixed_constraint_body_;
     StdVec<int> body_indices_fixed_constraint_;
     // for ConstrainSolidBodyRegion
-    StdVec<SharedPtr<SimpleDynamics<solid_dynamics::FixBodyPartConstraint>>> fixed_constraint_region_;
+    StdVec<SharedPtr<SimpleDynamics<FixBodyPartConstraint>>> fixed_constraint_region_;
     StdVec<ConstrainedRegionPair> body_indices_fixed_constraint_region_;
     // for PositionSolidBody
     StdVec<SharedPtr<SimpleDynamics<solid_dynamics::PositionSolidBody>>> position_solid_body_;
@@ -248,13 +249,6 @@ class StructuralSimulation
 
     // iterators
     int iteration_;
-
-    // data storage
-    StdVec<Real> von_mises_stress_max_;
-    StdLargeVec<StdLargeVec<Real>> von_mises_stress_particles_;
-
-    StdVec<Real> von_mises_strain_max_;
-    StdLargeVec<StdLargeVec<Real>> von_mises_strain_particles_;
 
     // for constructor, the order is important
     void scaleTranslationAndResolution();
@@ -289,7 +283,7 @@ class StructuralSimulation
     void executeSurfacePressure();
     void executeSpringDamperConstraintParticleWise();
     void executeSpringNormalOnSurfaceParticles();
-    void executeContactDensitySummation();
+    void executeContactFactorSummation();
     void executeContactForce();
     void executeStressRelaxationFirstHalf(Real dt);
     void executeConstrainSolidBody();

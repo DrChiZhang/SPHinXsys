@@ -28,6 +28,8 @@
  * However, some other applications may use this function,
  * such as transport velocity formulation,
  * for masking some function which is only applicable for the bulk of the fluid body.
+ * Currently, indicator used 0 for bulk, 1 for free surface indicator,
+ * other to be defined.
  * @author	Xiangyu Hu
  */
 
@@ -51,14 +53,14 @@ class FreeSurfaceIndication<DataDelegationType>
     virtual ~FreeSurfaceIndication(){};
 
   protected:
-    StdLargeVec<int> &indicator_;
-    StdLargeVec<Real> &pos_div_;
+    int *indicator_;
+    Real *pos_div_, *Vol_;
     Real threshold_by_dimensions_;
 };
 
 template <>
 class FreeSurfaceIndication<Inner<>>
-    : public FreeSurfaceIndication<GeneralDataDelegateInner>
+    : public FreeSurfaceIndication<DataDelegateInner>
 {
   public:
     explicit FreeSurfaceIndication(BaseInnerRelation &inner_relation);
@@ -82,20 +84,29 @@ class FreeSurfaceIndication<Inner<SpatialTemporal>>
     void update(size_t index_i, Real dt = 0.0);
 
   protected:
-    StdLargeVec<int> previous_surface_indicator_;
+    int *previous_surface_indicator_;
     bool isNearPreviousFreeSurface(size_t index_i);
 };
 using SpatialTemporalFreeSurfaceIndicationInner = FreeSurfaceIndication<Inner<SpatialTemporal>>;
 
 template <>
 class FreeSurfaceIndication<Contact<>>
-    : public FreeSurfaceIndication<GeneralDataDelegateContact>
+    : public FreeSurfaceIndication<DataDelegateContact>
 {
   public:
     explicit FreeSurfaceIndication(BaseContactRelation &contact_relation)
-        : FreeSurfaceIndication<GeneralDataDelegateContact>(contact_relation){};
+        : FreeSurfaceIndication<DataDelegateContact>(contact_relation)
+    {
+        for (size_t k = 0; k != this->contact_particles_.size(); ++k)
+        {
+            contact_Vol_.push_back(this->contact_particles_[k]->getVariableDataByName<Real>("VolumetricMeasure"));
+        }
+    };
     virtual ~FreeSurfaceIndication(){};
     void interaction(size_t index_i, Real dt = 0.0);
+
+  protected:
+    StdVec<Real *> contact_Vol_;
 };
 
 /**
@@ -109,7 +120,7 @@ class NonWetting;
 
 template <>
 class FreeSurfaceIndication<Contact<NonWetting>>
-    : public FreeSurfaceIndication<GeneralDataDelegateContact>
+    : public FreeSurfaceIndication<DataDelegateContact>
 {
   public:
     FreeSurfaceIndication(BaseContactRelation &contact_relation);
@@ -117,7 +128,7 @@ class FreeSurfaceIndication<Contact<NonWetting>>
     void interaction(size_t index_i, Real dt = 0.0);
 
   protected:
-    StdVec<StdLargeVec<Real> *> contact_phi_;
+    StdVec<Real *> contact_phi_, contact_Vol_;
 };
 
 using FreeSurfaceIndicationComplex =

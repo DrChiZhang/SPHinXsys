@@ -30,6 +30,7 @@
 #define DATA_TYPE_2D_H
 
 #include "base_data_type.h"
+#include "geometric_primitive.h"
 #include "scalar_functions.h"
 
 namespace SPH
@@ -37,11 +38,11 @@ namespace SPH
 using Arrayi = Array2i;
 using Vecd = Vec2d;
 using Matd = Mat2d;
-using AlignedBox = AlignedBox2d;
 using AngularVecd = Real;
 using Rotation = Rotation2d;
 using BoundingBox = BaseBoundingBox<Vec2d>;
 using Transform = BaseTransform<Rotation2d, Vec2d>;
+using CellNeighborhood = std::array<std::array<int, 3>, 3>;
 
 template <class DataType, int array_size>
 using PackageDataMatrix = std::array<std::array<DataType, array_size>, array_size>;

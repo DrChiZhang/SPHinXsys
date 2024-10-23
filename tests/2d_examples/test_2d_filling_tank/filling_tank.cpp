@@ -90,24 +90,22 @@ int main(int ac, char *av[])
     /** Build up a SPHSystem */
     SPHSystem sph_system(system_domain_bounds, resolution_ref);
     sph_system.handleCommandlineOptions(ac, av);
-    /** Set the starting time. */
-    GlobalStaticVariables::physical_time_ = 0.0;
     //----------------------------------------------------------------------
     //	Creating body, materials and particles.
     //----------------------------------------------------------------------
-    FluidBody water_body(sph_system, makeShared<TransformShape<GeometricShapeBox>>(
-                                         Transform(inlet_translation), inlet_halfsize, "WaterBody"));
+    TransformShape<GeometricShapeBox> water_inlet_shape(Transform(inlet_translation), inlet_halfsize);
+    FluidBody water_body(sph_system, water_inlet_shape, "WaterBody");
     water_body.sph_adaptation_->resetKernel<KernelTabulated<KernelWendlandC2>>(20);
-    water_body.defineParticlesAndMaterial<BaseParticles, WeaklyCompressibleFluid>(rho0_f, c_f);
-    water_body.generateParticles<ParticleGeneratorLattice>();
-    /**note that, as particle sort is activated (by default) for fluid particles,
-     * the output occasionally does not reflect the real free surface indication due to sorting. */
+    water_body.defineMaterial<WeaklyCompressibleFluid>(rho0_f, c_f);
+    ParticleBuffer<ReserveSizeFactor> inlet_buffer(350.0);
+    water_body.generateParticlesWithReserve<BaseParticles, Lattice>(inlet_buffer);
+
     SolidBody wall(sph_system, makeShared<WallBoundary>("Wall"));
-    wall.defineParticlesAndMaterial<SolidParticles, Solid>();
-    wall.generateParticles<ParticleGeneratorLattice>();
+    wall.defineMaterial<Solid>();
+    wall.generateParticles<BaseParticles, Lattice>();
 
     ObserverBody fluid_observer(sph_system, "FluidObserver");
-    fluid_observer.generateParticles<ParticleGeneratorObserver>(observation_location);
+    fluid_observer.generateParticles<ObserverParticles>(observation_location);
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -126,27 +124,31 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Define all numerical methods which are used in this case.
     //----------------------------------------------------------------------
+    SimpleDynamics<NormalDirectionFromBodyShape> wall_normal_direction(wall);
+    InteractionWithUpdate<SpatialTemporalFreeSurfaceIndicationComplex> indicate_free_surface(water_body_inner, water_body_contact);
+
     Dynamics1Level<fluid_dynamics::Integration1stHalfWithWallRiemann> pressure_relaxation(water_body_inner, water_body_contact);
     Dynamics1Level<fluid_dynamics::Integration2ndHalfWithWallRiemann> density_relaxation(water_body_inner, water_body_contact);
     InteractionWithUpdate<fluid_dynamics::DensitySummationComplexFreeSurface> update_density_by_summation(water_body_inner, water_body_contact);
-    InteractionWithUpdate<SpatialTemporalFreeSurfaceIndicationComplex> indicate_free_surface(water_body_inner, water_body_contact);
-    water_body.addBodyStateForRecording<Real>("PositionDivergence"); // for debug
-    water_body.addBodyStateForRecording<int>("Indicator");           // for debug
 
     Gravity gravity(Vecd(0.0, -gravity_g));
-    SimpleDynamics<GravityForce> constant_gravity(water_body, gravity);
-    ReduceDynamics<fluid_dynamics::AdvectionTimeStepSize> get_fluid_advection_time_step_size(water_body, U_f);
-    ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> get_fluid_time_step_size(water_body);
-    SimpleDynamics<NormalDirectionFromBodyShape> wall_normal_direction(wall);
-    BodyAlignedBoxByParticle emitter(water_body, makeShared<AlignedBoxShape>(Transform(inlet_translation), inlet_halfsize));
-    SimpleDynamics<InletInflowCondition> inflow_condition(emitter);
-    SimpleDynamics<fluid_dynamics::EmitterInflowInjection> emitter_injection(emitter, 350, 0);
+    SimpleDynamics<GravityForce<Gravity>> constant_gravity(water_body, gravity);
+    ReduceDynamics<fluid_dynamics::AdvectionViscousTimeStep> get_fluid_advection_time_step_size(water_body, U_f);
+    ReduceDynamics<fluid_dynamics::AcousticTimeStep> get_fluid_time_step_size(water_body);
 
+    BodyAlignedBoxByParticle emitter(water_body, makeShared<AlignedBoxShape>(xAxis, Transform(inlet_translation), inlet_halfsize));
+    SimpleDynamics<InletInflowCondition> inflow_condition(emitter);
+    SimpleDynamics<fluid_dynamics::EmitterInflowInjection> emitter_injection(emitter, inlet_buffer);
     //----------------------------------------------------------------------
-    //	File Output
+    //	Define the configuration related particles dynamics.
+    //----------------------------------------------------------------------
+    ParticleSorting particle_sorting(water_body);
+    //----------------------------------------------------------------------
+    //	File output and regression check.
     //----------------------------------------------------------------------
     IOEnvironment io_environment(sph_system);
-    BodyStatesRecordingToVtp body_states_recording(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp body_states_recording(sph_system);
+    body_states_recording.addToWrite<int>(water_body, "Indicator");
     RegressionTestDynamicTimeWarping<ReducedQuantityRecording<TotalMechanicalEnergy>> write_water_mechanical_energy(water_body, gravity);
     RegressionTestDynamicTimeWarping<ObservedQuantityRecording<Real>> write_recorded_water_pressure("Pressure", fluid_observer_contact);
     //----------------------------------------------------------------------
@@ -161,7 +163,8 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Time stepping control parameters.
     //----------------------------------------------------------------------
-    size_t number_of_iterations = sph_system.RestartStep();
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
+    size_t number_of_iterations = 0;
     int screen_output_interval = 100;
     Real end_time = 30.0;
     Real output_interval = 0.1;
@@ -177,7 +180,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         /** Integrate time (loop) until the next output time. */
@@ -197,13 +200,13 @@ int main(int ac, char *av[])
                 dt = get_fluid_time_step_size.exec();
                 relaxation_time += dt;
                 integration_time += dt;
-                GlobalStaticVariables::physical_time_ += dt;
+                physical_time += dt;
             }
 
             if (number_of_iterations % screen_output_interval == 0)
             {
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
-                          << GlobalStaticVariables::physical_time_
+                          << physical_time
                           << "	Dt = " << Dt << "	dt = " << dt << "\n";
             }
             number_of_iterations++;
@@ -211,8 +214,11 @@ int main(int ac, char *av[])
             /** inflow emitter injection*/
             emitter_injection.exec();
             /** Update cell linked list and configuration. */
-
-            water_body.updateCellLinkedListWithParticleSort(100);
+            if (number_of_iterations % 100 == 0 && number_of_iterations != 1)
+            {
+                particle_sorting.exec();
+            }
+            water_body.updateCellLinkedList();
             water_body_complex.updateConfiguration();
             fluid_observer_contact.updateConfiguration();
         }

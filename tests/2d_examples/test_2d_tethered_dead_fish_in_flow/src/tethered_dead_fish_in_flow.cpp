@@ -104,6 +104,9 @@ std::vector<Vecd> createFishBlockingShape()
 
     return pnts_blocking_shape;
 }
+
+namespace SPH
+{
 /**
  * Water body shape defintion.
  */
@@ -155,17 +158,13 @@ MultiPolygon createFishHeadShape(SPHBody &sph_body)
     multi_polygon.addAPolygon(createFishBlockingShape(), ShapeBooleanOps::sub);
     return multi_polygon;
 };
-/**
- * Observer particle generator.
- */
-class FishObserverParticleGenerator : public ParticleGeneratorObserver
+
+StdVec<Vecd> createObservationPoints()
 {
-  public:
-    explicit FishObserverParticleGenerator(SPHBody &sph_body) : ParticleGeneratorObserver(sph_body)
-    {
-        positions_.push_back(Vecd(cx + resolution_ref, cy));
-        positions_.push_back(Vecd(cx + fish_length - resolution_ref, cy));
-    }
+    StdVec<Vecd> observation_points;
+    observation_points.push_back(Vecd(cx + resolution_ref, cy));
+    observation_points.push_back(Vecd(cx + fish_length - resolution_ref, cy));
+    return observation_points;
 };
 //----------------------------------------------------------------------
 //	Inflow velocity
@@ -182,15 +181,16 @@ struct InflowVelocity
           aligned_box_(boundary_condition.getAlignedBox()),
           halfsize_(aligned_box_.HalfSize()) {}
 
-    Vecd operator()(Vecd &position, Vecd &velocity)
+    Vecd operator()(Vecd &position, Vecd &velocity, Real current_time)
     {
         Vecd target_velocity = velocity;
-        Real run_time = GlobalStaticVariables::physical_time_;
-        Real u_ave = run_time < t_ref_ ? 0.5 * u_ref_ * (1.0 - cos(Pi * run_time / t_ref_)) : u_ref_;
+        Real u_ave = current_time < t_ref_ ? 0.5 * u_ref_ * (1.0 - cos(Pi * current_time / t_ref_)) : u_ref_;
         target_velocity[0] = 1.5 * u_ave * SMAX(0.0, 1.0 - position[1] * position[1] / halfsize_[1] / halfsize_[1]);
         return target_velocity;
     }
 };
+} // namespace SPH
+
 /**
  * Main program starts here.
  */
@@ -211,30 +211,30 @@ int main(int ac, char *av[])
      * @brief   Particles and body creation for water.
      */
     FluidBody water_block(system, makeShared<WaterBlock>("WaterBody"));
-    water_block.defineParticlesAndMaterial<BaseParticles, WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
-    water_block.generateParticles<ParticleGeneratorLattice>();
+    water_block.defineMaterial<WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
+    water_block.generateParticles<BaseParticles, Lattice>();
     /**
      * @brief   Particles and body creation for wall boundary.
      */
     SolidBody wall_boundary(system, makeShared<WallBoundary>("Wall"));
-    wall_boundary.defineParticlesAndMaterial<SolidParticles, Solid>();
-    wall_boundary.generateParticles<ParticleGeneratorLattice>();
+    wall_boundary.defineMaterial<Solid>();
+    wall_boundary.generateParticles<BaseParticles, Lattice>();
     /**
      * @brief   Particles and body creation for fish.
      */
     SolidBody fish_body(system, makeShared<FishBody>("FishBody"));
     fish_body.defineAdaptationRatios(1.15, 2.0);
     fish_body.defineBodyLevelSetShape();
-    fish_body.defineParticlesAndMaterial<ElasticSolidParticles, NeoHookeanSolid>(rho0_s, Youngs_modulus, poisson);
+    fish_body.defineMaterial<NeoHookeanSolid>(rho0_s, Youngs_modulus, poisson);
     // Using relaxed particle distribution if needed
     (!system.RunParticleRelaxation() && system.ReloadParticles())
-        ? fish_body.generateParticles<ParticleGeneratorReload>(fish_body.getName())
-        : fish_body.generateParticles<ParticleGeneratorLattice>();
+        ? fish_body.generateParticles<BaseParticles, Reload>(fish_body.getName())
+        : fish_body.generateParticles<BaseParticles, Lattice>();
     /**
      * @brief   Particle and body creation of fish observer.
      */
     ObserverBody fish_observer(system, "Observer");
-    fish_observer.generateParticles<FishObserverParticleGenerator>();
+    fish_observer.generateParticles<ObserverParticles>(createObservationPoints());
     /** topology */
     InnerRelation water_block_inner(water_block);
     InnerRelation fish_body_inner(fish_body);
@@ -257,7 +257,7 @@ int main(int ac, char *av[])
         /** Write the body state to Vtp file. */
         BodyStatesRecordingToVtp write_fish_body(fish_body);
         /** Write the particle reload files. */
-        ReloadParticleIO write_particle_reload_files({&fish_body});
+        ReloadParticleIO write_particle_reload_files(fish_body);
 
         /** A  Physics relaxation step. */
         RelaxationStepInner relaxation_step_inner(fish_body_inner);
@@ -294,21 +294,21 @@ int main(int ac, char *av[])
      * @brief   Methods used for updating data structure.
      */
     /** Periodic BCs in x direction. */
-    PeriodicConditionUsingCellLinkedList periodic_condition(water_block, water_block.getBodyShapeBounds(), xAxis);
+    PeriodicAlongAxis periodic_along_x(water_block.getSPHBodyBounds(), xAxis);
+    PeriodicConditionUsingCellLinkedList periodic_condition(water_block, periodic_along_x);
     SimpleDynamics<NormalDirectionFromBodyShape> wall_boundary_normal_direction(wall_boundary);
     SimpleDynamics<NormalDirectionFromBodyShape> fish_body_normal_direction(fish_body);
     /** Corrected configuration.*/
-    InteractionWithUpdate<KernelCorrectionMatrixInner>
-        fish_body_corrected_configuration(fish_body_inner);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> fish_body_corrected_configuration(fish_body_inner);
     /**
      * Common particle dynamics.
      */
     /** Evaluation of density by summation approach. */
     InteractionWithUpdate<fluid_dynamics::DensitySummationComplex> update_density_by_summation(water_block_inner, water_block_contact);
     /** Time step size without considering sound wave speed. */
-    ReduceDynamics<fluid_dynamics::AdvectionTimeStepSize> get_fluid_advection_time_step_size(water_block, U_f);
+    ReduceDynamics<fluid_dynamics::AdvectionViscousTimeStep> get_fluid_advection_time_step_size(water_block, U_f);
     /** Time step size with considering sound wave speed. */
-    ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> get_fluid_time_step_size(water_block);
+    ReduceDynamics<fluid_dynamics::AcousticTimeStep> get_fluid_time_step_size(water_block);
     /** Pressure relaxation using verlet time stepping. */
     Dynamics1Level<fluid_dynamics::Integration1stHalfWithWallRiemann> pressure_relaxation(water_block_inner, water_block_contact);
     Dynamics1Level<fluid_dynamics::Integration2ndHalfWithWallNoRiemann> density_relaxation(water_block_inner, water_block_contact);
@@ -320,19 +320,19 @@ int main(int ac, char *av[])
     InteractionDynamics<fluid_dynamics::VorticityInner> compute_vorticity(water_block_inner);
     /** Inflow boundary condition. */
     BodyAlignedBoxByCell inflow_buffer(
-        water_block, makeShared<AlignedBoxShape>(Transform(Vec2d(buffer_translation)), buffer_halfsize));
+        water_block, makeShared<AlignedBoxShape>(xAxis, Transform(Vec2d(buffer_translation)), buffer_halfsize));
     SimpleDynamics<fluid_dynamics::InflowVelocityCondition<InflowVelocity>> parabolic_inflow(inflow_buffer);
 
     /**
      * Fluid structure interaction model.
      */
     InteractionWithUpdate<solid_dynamics::ViscousForceFromFluid> viscous_force_on_fish_body(fish_body_contact);
-    InteractionWithUpdate<solid_dynamics::PressureForceFromFluidRiemann> fluid_force_on_fish_body(fish_body_contact);
+    InteractionWithUpdate<solid_dynamics::PressureForceFromFluid<decltype(density_relaxation)>> fluid_force_on_fish_body(fish_body_contact);
     /**
      * Solid dynamics.
      */
     /** Time step size calculation. */
-    ReduceDynamics<solid_dynamics::AcousticTimeStepSize> fish_body_computing_time_step_size(fish_body);
+    ReduceDynamics<solid_dynamics::AcousticTimeStep> fish_body_computing_time_step_size(fish_body);
     /** Process of stress relaxation. */
     Dynamics1Level<solid_dynamics::Integration1stHalfPK2>
         fish_body_stress_relaxation_first_half(fish_body_inner);
@@ -343,6 +343,10 @@ int main(int ac, char *av[])
         fish_body_update_normal(fish_body);
     /** Compute the average velocity on fish body. */
     solid_dynamics::AverageVelocityAndAcceleration fish_body_average_velocity(fish_body);
+    //----------------------------------------------------------------------
+    //	Define the configuration related particles dynamics.
+    //----------------------------------------------------------------------
+    ParticleSorting particle_sorting(water_block);
     /**
      * The multi body system from simbody.
      */
@@ -401,13 +405,10 @@ int main(int ac, char *av[])
     SimpleDynamics<solid_dynamics::ConstraintBodyPartBySimBody>
         constraint_tethered_spot(fish_head, MBsystem, tethered_spot, integ);
 
-    BodyStatesRecordingToVtp write_real_body_states(system.real_bodies_);
+    BodyStatesRecordingToVtp write_real_body_states(system);
     ReducedQuantityRecording<QuantitySummation<Vecd>> write_total_pressure_force_from_fluid(fish_body, "PressureForceFromFluid");
     ObservedQuantityRecording<Vecd> write_fish_displacement("Position", fish_observer_contact);
-    /**
-     * Time steeping starts here.
-     */
-    GlobalStaticVariables::physical_time_ = 0.0;
+
     /**
      * Initial periodic boundary condition which copies the particle identifies
      * as extra cell linked list form periodic regions to the corresponding boundaries
@@ -428,6 +429,7 @@ int main(int ac, char *av[])
     /**
      * Time parameters
      */
+    Real &physical_time = *system.getSystemVariableDataByName<Real>("PhysicalTime");
     int number_of_iterations = 0;
     int screen_output_interval = 100;
     Real end_time = 200.0;
@@ -440,7 +442,7 @@ int main(int ac, char *av[])
     /**
      * Main loop starts here.
      */
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_interval)
@@ -487,13 +489,13 @@ int main(int ac, char *av[])
 
                 relaxation_time += dt;
                 integration_time += dt;
-                GlobalStaticVariables::physical_time_ += dt;
+                physical_time += dt;
                 parabolic_inflow.exec();
             }
             if (number_of_iterations % screen_output_interval == 0)
             {
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
-                          << GlobalStaticVariables::physical_time_
+                          << physical_time
                           << "	Dt = " << Dt << "	dt = " << dt << "	dt_s = " << dt_s << "\n";
             }
             number_of_iterations++;
@@ -502,7 +504,11 @@ int main(int ac, char *av[])
             viz.report(integ.getState());
             /** Water block configuration and periodic condition. */
             periodic_condition.bounding_.exec();
-            water_block.updateCellLinkedListWithParticleSort(100);
+            if (number_of_iterations % 100 == 0 && number_of_iterations != 1)
+            {
+                particle_sorting.exec();
+            }
+            water_block.updateCellLinkedList();
             fish_body.updateCellLinkedList();
             periodic_condition.update_cell_linked_list_.exec();
             water_block_complex.updateConfiguration();

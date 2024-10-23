@@ -55,14 +55,14 @@ class TransportVelocityCorrection<Base, DataDelegationType, KernelCorrectionType
     virtual ~TransportVelocityCorrection(){};
 
   protected:
-    StdLargeVec<Vecd> &transport_acc_;
+    Vecd *zero_gradient_residue_;
     KernelCorrectionType kernel_correction_;
-    ParticleScope checkWithinScope;
+    ParticleScope within_scope_;
 };
 
-template <class ResolutionType, typename... CommonControlTypes>
-class TransportVelocityCorrection<Inner<ResolutionType>, CommonControlTypes...>
-    : public TransportVelocityCorrection<Base, FluidDataInner, CommonControlTypes...>
+template <class ResolutionType, class LimiterType, typename... CommonControlTypes>
+class TransportVelocityCorrection<Inner<ResolutionType, LimiterType>, CommonControlTypes...>
+    : public TransportVelocityCorrection<Base, DataDelegateInner, CommonControlTypes...>
 {
   public:
     explicit TransportVelocityCorrection(BaseInnerRelation &inner_relation, Real coefficient = 0.2);
@@ -74,27 +74,32 @@ class TransportVelocityCorrection<Inner<ResolutionType>, CommonControlTypes...>
     void update(size_t index_i, Real dt = 0.0);
 
   protected:
-    const Real correction_scaling_;
-    StdLargeVec<Vecd> &pos_;
+    const Real h_ref_, correction_scaling_;
+    Real *Vol_;
+    Vecd *pos_;
     ResolutionType h_ratio_;
+    LimiterType limiter_;
 };
-template <class ParticleScope>
+template <class LimiterType, class ParticleScope>
 using TransportVelocityCorrectionInner =
-    TransportVelocityCorrection<Inner<SingleResolution>, NoKernelCorrection, ParticleScope>;
+    TransportVelocityCorrection<Inner<SingleResolution, LimiterType>, NoKernelCorrection, ParticleScope>;
 
 template <typename... CommonControlTypes>
 class TransportVelocityCorrection<Contact<Boundary>, CommonControlTypes...>
-    : public TransportVelocityCorrection<Base, FluidContactData, CommonControlTypes...>
+    : public TransportVelocityCorrection<Base, DataDelegateContact, CommonControlTypes...>
 {
   public:
     explicit TransportVelocityCorrection(BaseContactRelation &contact_relation);
     virtual ~TransportVelocityCorrection(){};
     void interaction(size_t index_i, Real dt = 0.0);
+
+  protected:
+    StdVec<Real *> wall_Vol_;
 };
 
 template <class KernelCorrectionType, typename... CommonControlTypes>
 class TransportVelocityCorrection<Contact<>, KernelCorrectionType, CommonControlTypes...>
-    : public TransportVelocityCorrection<Base, FluidContactData, KernelCorrectionType, CommonControlTypes...>
+    : public TransportVelocityCorrection<Base, DataDelegateContact, KernelCorrectionType, CommonControlTypes...>
 {
   public:
     explicit TransportVelocityCorrection(BaseContactRelation &contact_relation);
@@ -103,23 +108,36 @@ class TransportVelocityCorrection<Contact<>, KernelCorrectionType, CommonControl
 
   protected:
     StdVec<KernelCorrectionType> contact_kernel_corrections_;
+    StdVec<Real *> contact_Vol_;
 };
 
-template <class ResolutionType, typename... CommonControlTypes>
+template <class ResolutionType, class LimiterType, typename... CommonControlTypes>
 using BaseTransportVelocityCorrectionComplex =
-    ComplexInteraction<TransportVelocityCorrection<Inner<ResolutionType>, Contact<Boundary>>, CommonControlTypes...>;
+    ComplexInteraction<TransportVelocityCorrection<Inner<ResolutionType, LimiterType>, Contact<Boundary>>, CommonControlTypes...>;
 
 template <class ParticleScope>
 using TransportVelocityCorrectionComplex =
-    BaseTransportVelocityCorrectionComplex<SingleResolution, NoKernelCorrection, ParticleScope>;
+    BaseTransportVelocityCorrectionComplex<SingleResolution, NoLimiter, NoKernelCorrection, ParticleScope>;
+
+template <class ParticleScope>
+using TransportVelocityCorrectionCorrectedComplex =
+    BaseTransportVelocityCorrectionComplex<SingleResolution, NoLimiter, LinearGradientCorrection, ParticleScope>;
+
+template <class ParticleScope>
+using TransportVelocityLimitedCorrectionComplex =
+    BaseTransportVelocityCorrectionComplex<SingleResolution, TruncatedLinear, NoKernelCorrection, ParticleScope>;
+
+template <class ParticleScope>
+using TransportVelocityLimitedCorrectionCorrectedComplex =
+    BaseTransportVelocityCorrectionComplex<SingleResolution, TruncatedLinear, LinearGradientCorrection, ParticleScope>;
 
 template <class ParticleScope>
 using TransportVelocityCorrectionComplexAdaptive =
-    BaseTransportVelocityCorrectionComplex<AdaptiveResolution, NoKernelCorrection, ParticleScope>;
+    BaseTransportVelocityCorrectionComplex<AdaptiveResolution, NoLimiter, NoKernelCorrection, ParticleScope>;
 
 template <class ResolutionType, typename... CommonControlTypes>
 using BaseMultiPhaseTransportVelocityCorrectionComplex =
-    ComplexInteraction<TransportVelocityCorrection<Inner<ResolutionType>, Contact<>, Contact<Boundary>>, CommonControlTypes...>;
+    ComplexInteraction<TransportVelocityCorrection<Inner<ResolutionType, NoLimiter>, Contact<>, Contact<Boundary>>, CommonControlTypes...>;
 
 template <class ParticleScope>
 using MultiPhaseTransportVelocityCorrectionComplex =

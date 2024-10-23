@@ -32,44 +32,47 @@
 
 #include "base_data_package.h"
 #include "base_particle_dynamics.h"
-#include "particle_functors.h"
-#include "sph_data_containers.h"
+#include "execution_policy.h"
+#include "sphinxsys_containers.h"
 
 namespace SPH
 {
-//----------------------------------------------------------------------
-// Interaction type identifies
-//----------------------------------------------------------------------
-template <typename... InnerParameters>
-class Inner; /**< Inner interaction: interaction within a body*/
-
-template <typename... ContactParameters>
-class Contact; /**< Contact interaction: interaction between a body with one or several another bodies */
-
-class Boundary;        /**< Interaction with boundary */
-class Wall;            /**< Interaction with wall boundary */
-class Extended;        /**< An extened method of an interaction type */
-class SpatialTemporal; /**< A interaction considering spatial temporal correlations */
-class Dynamic;         /**< A dynamic interaction */
-
 /**
  * @class BaseLocalDynamics
  * @brief The base class for all local particle dynamics.
+ * @details The basic design idea is define local dynamics for local particle operations.
+ * We split a general local dynamics into two parts in respect of functionality:
+ * one is the action on singular data, which is carried within the function setupDynamics,
+ * the other is the action on discrete variables, which will be carried out
+ * by the computing kernel. In the scenarios of offloading computing,
+ * the first function is generally carried on the host and the other on computing device.
+ * We also split the local dynamics into two part in respect of memory management.
  */
 template <class DynamicsIdentifier>
 class BaseLocalDynamics
 {
+    UniquePtrsKeeper<Entity> constant_entity_ptrs_;
+
   public:
     explicit BaseLocalDynamics(DynamicsIdentifier &identifier)
-        : identifier_(identifier){};
+        : identifier_(identifier), sph_system_(identifier.getSPHSystem()),
+          sph_body_(identifier.getSPHBody()),
+          particles_(&sph_body_.getBaseParticles()){};
     virtual ~BaseLocalDynamics(){};
-    SPHBody &getSPHBody() { return sph_body_; };
     DynamicsIdentifier &getDynamicsIdentifier() { return identifier_; };
+    SPHBody &getSPHBody() { return sph_body_; };
+    BaseParticles *getParticles() { return particles_; };
     virtual void setupDynamics(Real dt = 0.0){}; // setup global parameters
+    void registerComputingKernel(Implementation<Base> *implementation)
+    {
+        sph_body_.registerComputingKernel(implementation);
+    };
+
   protected:
     DynamicsIdentifier &identifier_;
-    SPHBody &sph_body_ = identifier_.getSPHBody();
-    BaseParticles &base_particles_ = sph_body_.getBaseParticles();
+    SPHSystem &sph_system_;
+    SPHBody &sph_body_;
+    BaseParticles *particles_;
 };
 using LocalDynamics = BaseLocalDynamics<SPHBody>;
 
@@ -77,28 +80,27 @@ using LocalDynamics = BaseLocalDynamics<SPHBody>;
  * @class BaseLocalDynamicsReduce
  * @brief The base class for all local particle dynamics for reducing.
  */
-template <typename ReturnType, typename Operation, class DynamicsIdentifier>
+template <typename Operation, class DynamicsIdentifier>
 class BaseLocalDynamicsReduce : public BaseLocalDynamics<DynamicsIdentifier>
 {
   public:
-    BaseLocalDynamicsReduce(DynamicsIdentifier &identifier, ReturnType reference)
-        : BaseLocalDynamics<DynamicsIdentifier>(identifier), reference_(reference),
+    explicit BaseLocalDynamicsReduce(DynamicsIdentifier &identifier)
+        : BaseLocalDynamics<DynamicsIdentifier>(identifier),
           quantity_name_("ReducedQuantity"){};
     virtual ~BaseLocalDynamicsReduce(){};
 
-    using ReduceReturnType = ReturnType;
-    ReturnType Reference() { return reference_; };
+    using ReturnType = decltype(Operation::reference_);
+    ReturnType Reference() { return operation_.reference_; };
     std::string QuantityName() { return quantity_name_; };
     Operation &getOperation() { return operation_; };
     virtual ReturnType outputResult(ReturnType reduced_value) { return reduced_value; }
 
   protected:
-    ReturnType reference_;
     Operation operation_;
     std::string quantity_name_;
 };
-template <typename ReturnType, typename Operation>
-using LocalDynamicsReduce = BaseLocalDynamicsReduce<ReturnType, Operation, SPHBody>;
+template <typename Operation>
+using LocalDynamicsReduce = BaseLocalDynamicsReduce<Operation, SPHBody>;
 
 /**
  * @class Average
@@ -112,7 +114,7 @@ class Average : public ReduceSumType
     Average(DynamicsIdentifier &identifier, Args &&...args)
         : ReduceSumType(identifier, std::forward<Args>(args)...){};
     virtual ~Average(){};
-    using ReturnType = typename ReduceSumType::ReduceReturnType;
+    using ReturnType = typename ReduceSumType::ReturnType;
 
     virtual ReturnType outputResult(ReturnType reduced_value)
     {
@@ -124,6 +126,8 @@ class Average : public ReduceSumType
 /**
  * @class ConstructorArgs
  * @brief Class template argument deduction (CTAD) for constructor arguments.
+ * @details Note that the form "XXX" is not std::string type, so we need to use
+ * std::string("XXX") to convert it to std::string type.
  */
 template <typename BodyRelationType, typename... OtherArgs>
 struct ConstructorArgs
@@ -132,8 +136,7 @@ struct ConstructorArgs
     std::tuple<OtherArgs...> others_;
     SPHBody &getSPHBody() { return body_relation_.getSPHBody(); };
     ConstructorArgs(BodyRelationType &body_relation, OtherArgs... other_args)
-        : body_relation_(body_relation),
-          others_(other_args...){};
+        : body_relation_(body_relation), others_(other_args...){};
 };
 
 /**

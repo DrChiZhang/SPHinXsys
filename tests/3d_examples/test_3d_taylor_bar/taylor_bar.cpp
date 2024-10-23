@@ -26,27 +26,27 @@ int main(int ac, char *av[])
     SolidBody column(sph_system, makeShared<Column>("Column"));
     column.defineAdaptationRatios(1.3, 1.0);
     column.defineBodyLevelSetShape()->writeLevelSet(sph_system);
-    column.defineParticlesAndMaterial<ElasticSolidParticles, HardeningPlasticSolid>(
+    column.defineMaterial<HardeningPlasticSolid>(
         rho0_s, Youngs_modulus, poisson, yield_stress, hardening_modulus);
     (!sph_system.RunParticleRelaxation() && sph_system.ReloadParticles())
-        ? column.generateParticles<ParticleGeneratorReload>(column.getName())
-        : column.generateParticles<ParticleGeneratorLattice>();
-    column.addBodyStateForRecording<Vecd>("NormalDirection");
+        ? column.generateParticles<BaseParticles, Reload>(column.getName())
+        : column.generateParticles<BaseParticles, Lattice>();
 
     SolidBody wall(sph_system, makeShared<WallShape>("Wall"));
-    wall.defineParticlesAndMaterial<SolidParticles, SaintVenantKirchhoffSolid>(rho0_s, Youngs_modulus, poisson);
-    wall.generateParticles<ParticleGeneratorLattice>();
+    wall.defineMaterial<SaintVenantKirchhoffSolid>(rho0_s, Youngs_modulus, poisson);
+    wall.generateParticles<BaseParticles, Lattice>();
 
     /** Define Observer. */
     ObserverBody my_observer(sph_system, "MyObserver");
-    my_observer.generateParticles<ColumnObserverParticleGenerator>();
+    StdVec<Vecd> observation_location = {Vecd(0.0, 0.0, PW)};
+    my_observer.generateParticles<ObserverParticles>(observation_location);
 
     /**body relation topology */
     InnerRelation column_inner(column);
     ContactRelation my_observer_contact(my_observer, {&column});
     SurfaceContactRelation column_wall_contact(column, {&wall});
     /**define simple data file input and outputs functions. */
-    BodyStatesRecordingToVtp write_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_states(sph_system);
 
     if (sph_system.RunParticleRelaxation())
     {
@@ -87,13 +87,15 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	All numerical methods will be used in this case.
     //----------------------------------------------------------------------
+    SimpleDynamics<InitialCondition> initial_condition(column);
+    SimpleDynamics<NormalDirectionFromBodyShape> wall_normal_direction(wall);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> corrected_configuration(column_inner);
+
     Dynamics1Level<solid_dynamics::DecomposedPlasticIntegration1stHalf> stress_relaxation_first_half(column_inner);
     Dynamics1Level<solid_dynamics::Integration2ndHalf> stress_relaxation_second_half(column_inner);
     InteractionDynamics<DynamicContactForceWithWall> column_wall_contact_force(column_wall_contact);
-    SimpleDynamics<NormalDirectionFromBodyShape> wall_normal_direction(wall);
-    SimpleDynamics<InitialCondition> initial_condition(column);
-    InteractionWithUpdate<KernelCorrectionMatrixInner> corrected_configuration(column_inner);
-    ReduceDynamics<solid_dynamics::AcousticTimeStepSize> computing_time_step_size(column, 0.2);
+
+    ReduceDynamics<solid_dynamics::AcousticTimeStep> computing_time_step_size(column, 0.2);
     //----------------------------------------------------------------------
     //	Output
     //----------------------------------------------------------------------
@@ -103,7 +105,6 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     // From here the time stepping begins.
     //----------------------------------------------------------------------
-    GlobalStaticVariables::physical_time_ = 0.0;
     sph_system.initializeSystemCellLinkedLists();
     sph_system.initializeSystemConfigurations();
     wall_normal_direction.exec();
@@ -112,6 +113,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     // Setup time-stepping related simulation parameters.
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     int ite = 0;
     Real end_time = 1.0e-4;
     int screen_output_interval = 100;
@@ -129,7 +131,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     // Main time-stepping loop.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_period)
@@ -137,7 +139,7 @@ int main(int ac, char *av[])
             if (ite % screen_output_interval == 0)
             {
                 std::cout << "N=" << ite << " Time: "
-                          << GlobalStaticVariables::physical_time_ << "	dt: "
+                          << physical_time << "	dt: "
                           << dt << "\n";
 
                 if (ite != 0 && ite % observation_sample_interval == 0)
@@ -155,7 +157,7 @@ int main(int ac, char *av[])
             ite++;
             dt = computing_time_step_size.exec();
             integration_time += dt;
-            GlobalStaticVariables::physical_time_ += dt;
+            physical_time += dt;
         }
         TickCount t2 = TickCount::now();
         write_states.writeToFile();

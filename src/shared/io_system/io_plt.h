@@ -26,7 +26,8 @@
  * @author	Chi Zhang and Xiangyu Hu
  */
 
-#pragma once
+#ifndef IO_PLT_H
+#define IO_PLT_H
 
 #include "io_base.h"
 
@@ -57,10 +58,12 @@ class BodyStatesRecordingToPlt : public BodyStatesRecording
 {
   public:
     BodyStatesRecordingToPlt(SPHBody &body) : BodyStatesRecording(body){};
-    BodyStatesRecordingToPlt(SPHBodyVector bodies) : BodyStatesRecording(bodies){};
+    BodyStatesRecordingToPlt(SPHSystem &sph_system) : BodyStatesRecording(sph_system){};
     virtual ~BodyStatesRecordingToPlt(){};
 
   protected:
+    void writePltFileHeader(std::ofstream &output_file, ParticleVariables &variables_to_write);
+    void writePltFileParticleData(std::ofstream &output_file, ParticleVariables &variables_to_write, Vecd *position, size_t index);
     virtual void writeWithFileName(const std::string &sequence) override;
 };
 
@@ -80,3 +83,4 @@ class MeshRecordingToPlt : public BaseIO
     virtual void writeToFile(size_t iteration_step = 0) override;
 };
 } // namespace SPH
+#endif // IO_PLT_H

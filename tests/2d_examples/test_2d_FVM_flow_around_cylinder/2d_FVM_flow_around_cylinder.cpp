@@ -5,7 +5,6 @@
  * @author 	Zhentong Wang and Xiangyu Hu
  */
 #include "common_weakly_compressible_FVM_classes.h"
-#include "sphinxsys.h"
 using namespace SPH;
 //----------------------------------------------------------------------
 //	Basic geometry parameters and numerical setup.
@@ -57,10 +56,8 @@ class WaterBlock : public ComplexShape
 class FACBoundaryConditionSetup : public BoundaryConditionSetupInFVM
 {
   public:
-    FACBoundaryConditionSetup(BaseInnerRelationInFVM &inner_relation, vector<vector<size_t>> each_boundary_type_with_all_ghosts_index,
-                              vector<vector<Vecd>> each_boundary_type_with_all_ghosts_eij_, vector<vector<size_t>> each_boundary_type_contact_real_index)
-        : BoundaryConditionSetupInFVM(inner_relation, each_boundary_type_with_all_ghosts_index,
-                                      each_boundary_type_with_all_ghosts_eij_, each_boundary_type_contact_real_index),
+    FACBoundaryConditionSetup(BaseInnerRelationInFVM &inner_relation, GhostCreationFromMesh &ghost_creation)
+        : BoundaryConditionSetupInFVM(inner_relation, ghost_creation),
           fluid_(DynamicCast<WeaklyCompressibleFluid>(this, particles_->getBaseMaterial())){};
     virtual ~FACBoundaryConditionSetup(){};
 
@@ -89,21 +86,22 @@ class FACBoundaryConditionSetup : public BoundaryConditionSetupInFVM
 //----------------------------------------------------------------------
 int main(int ac, char *av[])
 {
+    // read data from ANSYS mesh.file
+    ANSYSMesh ansys_mesh(ansys_mesh_file_path);
     //----------------------------------------------------------------------
     //	Build up the environment of a SPHSystem.
     //----------------------------------------------------------------------
     BoundingBox system_domain_bounds(Vec2d(-DL_sponge, -DH_sponge), Vec2d(DL, DH + DH_sponge));
-    SPHSystem sph_system(system_domain_bounds, resolution_ref);
+    SPHSystem sph_system(system_domain_bounds, ansys_mesh.MinMeshEdge());
     sph_system.handleCommandlineOptions(ac, av)->setIOEnvironment();
     //----------------------------------------------------------------------
     //	Creating body, materials and particles.
     //----------------------------------------------------------------------
-    ANSYSMesh ansys_mesh(ansys_mesh_file_path);
     FluidBody water_block(sph_system, makeShared<WaterBlock>("WaterBlock"));
-    water_block.defineParticlesAndMaterial<BaseParticles, WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
-    water_block.generateParticles<ParticleGeneratorUnstructuredMesh>(ansys_mesh);
-    water_block.addBodyStateForRecording<Real>("Density");
-    GhostCreationFromMesh ghost_creation(water_block, ansys_mesh);
+    water_block.defineMaterial<WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
+    Ghost<ReserveSizeFactor> ghost_boundary(0.5);
+    water_block.generateParticlesWithReserve<BaseParticles, UnstructuredMesh>(ghost_boundary, ansys_mesh);
+    GhostCreationFromMesh ghost_creation(water_block, ansys_mesh, ghost_boundary);
     //----------------------------------------------------------------------
     //	Define body relation map.
     //----------------------------------------------------------------------
@@ -116,19 +114,19 @@ int main(int ac, char *av[])
     the value is larger, the numerical dissipation larger*/
     InteractionWithUpdate<fluid_dynamics::EulerianIntegration1stHalfInnerRiemann> pressure_relaxation(water_block_inner, 200.0);
     InteractionWithUpdate<fluid_dynamics::EulerianIntegration2ndHalfInnerRiemann> density_relaxation(water_block_inner, 200.0);
-    FACBoundaryConditionSetup boundary_condition_setup(water_block_inner, ghost_creation.each_boundary_type_with_all_ghosts_index_,
-                                                       ghost_creation.each_boundary_type_with_all_ghosts_eij_, ghost_creation.each_boundary_type_contact_real_index_);
-    ReduceDynamics<fluid_dynamics::WCAcousticTimeStepSizeInFVM> get_fluid_time_step_size(water_block, ansys_mesh.min_distance_between_nodes_);
+    FACBoundaryConditionSetup boundary_condition_setup(water_block_inner, ghost_creation);
+    ReduceDynamics<fluid_dynamics::WCAcousticTimeStepSizeInFVM> get_fluid_time_step_size(water_block, ansys_mesh.MinMeshEdge());
     InteractionWithUpdate<fluid_dynamics::ViscousForceInner> viscous_force(water_block_inner);
     //----------------------------------------------------------------------
     //	Compute the force exerted on solid body due to fluid pressure and viscosity
     //----------------------------------------------------------------------
     InteractionDynamics<fluid_dynamics::ViscousForceFromFluidInFVM> viscous_force_on_solid(water_block_inner, ghost_creation.each_boundary_type_contact_real_index_);
-    InteractionDynamics<fluid_dynamics::PressureForceFromFluidRiemannInFVM> pressure_force_on_solid(water_block_inner, ghost_creation.each_boundary_type_contact_real_index_);
+    InteractionDynamics<fluid_dynamics::PressureForceFromFluidInFVM<decltype(density_relaxation)>> pressure_force_on_solid(water_block_inner, ghost_creation.each_boundary_type_contact_real_index_);
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations and observations of the simulation.
     //----------------------------------------------------------------------
     BodyStatesRecordingInMeshToVtp write_real_body_states(water_block, ansys_mesh);
+    write_real_body_states.addToWrite<Real>(water_block, "Density");
     RegressionTestDynamicTimeWarping<ReducedQuantityRecording<QuantitySummation<Vecd>>> write_total_viscous_force_on_inserted_body(water_block, "ViscousForceOnSolid");
     ReducedQuantityRecording<QuantitySummation<Vecd>> write_total_pressure_force_on_inserted_body(water_block, "PressureForceOnSolid");
     ReducedQuantityRecording<MaximumSpeed> write_maximum_speed(water_block);
@@ -140,6 +138,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Setup for time-stepping control
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     size_t number_of_iterations = 0;
     int screen_output_interval = 1000;
     Real end_time = 70.0;
@@ -156,7 +155,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_interval)
@@ -169,12 +168,12 @@ int main(int ac, char *av[])
             density_relaxation.exec(dt);
 
             integration_time += dt;
-            GlobalStaticVariables::physical_time_ += dt;
+            physical_time += dt;
             if (number_of_iterations % screen_output_interval == 0)
             {
-                cout << fixed << setprecision(9) << "N=" << number_of_iterations << "	Time = "
-                     << GlobalStaticVariables::physical_time_
-                     << "	dt = " << dt << "\n";
+                std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
+                          << physical_time
+                          << "	dt = " << dt << "\n";
                 viscous_force_on_solid.exec();
                 pressure_force_on_solid.exec();
                 write_total_viscous_force_on_inserted_body.writeToFile(number_of_iterations);
@@ -191,7 +190,7 @@ int main(int ac, char *av[])
     TickCount t4 = TickCount::now();
     TimeInterval tt;
     tt = t4 - t1 - interval;
-    cout << "Total wall time for computation: " << tt.seconds() << " seconds." << endl;
+    std::cout << "Total wall time for computation: " << tt.seconds() << " seconds." << std::endl;
 
     write_total_viscous_force_on_inserted_body.testResult();
 

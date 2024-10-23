@@ -33,28 +33,25 @@
 #include "base_kernel.h"
 #include "elastic_solid.h"
 #include "solid_body.h"
-#include "solid_particles.h"
 
 namespace SPH
 {
 namespace active_muscle_dynamics
 {
-typedef DataDelegateSimple<ElasticSolidParticles> ElasticSolidDataSimple;
-
 /**
  * @class MuscleActivation
  * @brief  impose cases specific muscle activation
  * This is a abstract class to be override for case specific activation
  */
-class MuscleActivation : public LocalDynamics, public ElasticSolidDataSimple
+class MuscleActivation : public LocalDynamics
 {
   public:
     explicit MuscleActivation(SPHBody &sph_body);
     virtual ~MuscleActivation(){};
 
   protected:
-    StdLargeVec<Vecd> &pos0_;
-    StdLargeVec<Real> &active_contraction_stress_;
+    Vecd *pos0_;
+    Real *active_contraction_stress_;
 };
 } // namespace active_muscle_dynamics
 } // namespace SPH

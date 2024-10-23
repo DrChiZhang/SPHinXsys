@@ -48,20 +48,16 @@ class WallBoundary : public ComplexShape
     }
 };
 
-//	define an observer particle generator
-class WaterObserverParticleGenerator : public ParticleGeneratorObserver
+StdVec<Vecd> createObservationPoints()
 {
-  public:
-    explicit WaterObserverParticleGenerator(SPHBody &sph_body) : ParticleGeneratorObserver(sph_body)
-    {
-        // add observation points
-        positions_.push_back(Vecd(DL, 0.01, 0.5 * DW));
-        positions_.push_back(Vecd(DL, 0.1, 0.5 * DW));
-        positions_.push_back(Vecd(DL, 0.2, 0.5 * DW));
-        positions_.push_back(Vecd(DL, 0.24, 0.5 * DW));
-        positions_.push_back(Vecd(DL, 0.252, 0.5 * DW));
-        positions_.push_back(Vecd(DL, 0.266, 0.5 * DW));
-    }
+    StdVec<Vecd> observation_points;
+    observation_points.push_back(Vecd(DL, 0.01, 0.5 * DW));
+    observation_points.push_back(Vecd(DL, 0.1, 0.5 * DW));
+    observation_points.push_back(Vecd(DL, 0.2, 0.5 * DW));
+    observation_points.push_back(Vecd(DL, 0.24, 0.5 * DW));
+    observation_points.push_back(Vecd(DL, 0.252, 0.5 * DW));
+    observation_points.push_back(Vecd(DL, 0.266, 0.5 * DW));
+    return observation_points;
 };
 
 // the main program with commandline options
@@ -76,17 +72,17 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Creating bodies with corresponding materials and particles.
     //----------------------------------------------------------------------
-    FluidBody water_block(sph_system, makeShared<WaterBlock>("WaterBody"));
-    water_block.defineParticlesAndMaterial<BaseParticles, WeaklyCompressibleFluid>(rho0_f, c_f);
-    water_block.generateParticles<ParticleGeneratorLattice>();
+    WaterBlock initial_water_block("WaterBody");
+    FluidBody water_block(sph_system, initial_water_block);
+    water_block.defineMaterial<WeaklyCompressibleFluid>(rho0_f, c_f);
+    water_block.generateParticles<BaseParticles, Lattice>();
 
-    SolidBody wall_boundary(sph_system, makeShared<WallBoundary>("Wall"));
-    wall_boundary.defineParticlesAndMaterial<SolidParticles, Solid>();
-    wall_boundary.generateParticles<ParticleGeneratorLattice>();
-    wall_boundary.addBodyStateForRecording<Vec3d>("NormalDirection");
+    SolidBody wall_boundary(sph_system, makeShared<WallBoundary>("WallBoundary"));
+    wall_boundary.defineMaterial<Solid>();
+    wall_boundary.generateParticles<BaseParticles, Lattice>();
 
     ObserverBody fluid_observer(sph_system, "FluidObserver");
-    fluid_observer.generateParticles<WaterObserverParticleGenerator>();
+    fluid_observer.generateParticles<ObserverParticles>(createObservationPoints());
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -109,18 +105,25 @@ int main(int ac, char *av[])
     //	Note that there may be data dependence on the sequence of constructions.
     //----------------------------------------------------------------------
     Gravity gravity(Vec3d(0.0, -gravity_g, 0.0));
-    SimpleDynamics<GravityForce> constant_gravity(water_block, gravity);
+    SimpleDynamics<GravityForce<Gravity>> constant_gravity(water_block, gravity);
+    SimpleDynamics<NormalDirectionFromBodyShape> wall_boundary_normal_direction(wall_boundary);
+
     Dynamics1Level<fluid_dynamics::Integration1stHalfWithWallRiemann> pressure_relaxation(water_block_inner, water_wall_contact);
     Dynamics1Level<fluid_dynamics::Integration2ndHalfWithWallRiemann> density_relaxation(water_block_inner, water_wall_contact);
     InteractionWithUpdate<fluid_dynamics::DensitySummationComplexFreeSurface> update_density_by_summation(water_block_inner, water_wall_contact);
-    ReduceDynamics<fluid_dynamics::AdvectionTimeStepSize> get_fluid_advection_time_step_size(water_block, U_f);
-    ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> get_fluid_time_step_size(water_block);
-    SimpleDynamics<NormalDirectionFromBodyShape> wall_boundary_normal_direction(wall_boundary);
+
+    ReduceDynamics<fluid_dynamics::AdvectionViscousTimeStep> get_fluid_advection_time_step_size(water_block, U_f);
+    ReduceDynamics<fluid_dynamics::AcousticTimeStep> get_fluid_time_step_size(water_block);
+    //----------------------------------------------------------------------
+    //	Define the configuration related particles dynamics.
+    //----------------------------------------------------------------------
+    ParticleSorting particle_sorting(water_block);
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations, observations
     //	and regression tests of the simulation.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp write_water_block_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_water_block_states(sph_system);
+    write_water_block_states.addToWrite<Vec3d>(wall_boundary, "NormalDirection");
     RegressionTestDynamicTimeWarping<ReducedQuantityRecording<TotalMechanicalEnergy>> write_water_mechanical_energy(water_block, gravity);
     RegressionTestDynamicTimeWarping<ObservedQuantityRecording<Real>> write_recorded_water_pressure("Pressure", fluid_observer_contact);
     //----------------------------------------------------------------------
@@ -134,6 +137,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Setup for time-stepping control
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     size_t number_of_iterations = sph_system.RestartStep();
     int screen_output_interval = 100;
     Real end_time = 20.0;
@@ -152,7 +156,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_interval)
@@ -169,18 +173,22 @@ int main(int ac, char *av[])
                 dt = get_fluid_time_step_size.exec();
                 relaxation_time += dt;
                 integration_time += dt;
-                GlobalStaticVariables::physical_time_ += dt;
+                physical_time += dt;
             }
 
             if (number_of_iterations % screen_output_interval == 0)
             {
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
-                          << GlobalStaticVariables::physical_time_
+                          << physical_time
                           << "	Dt = " << Dt << "	dt = " << dt << "\n";
             }
             number_of_iterations++;
 
-            water_block.updateCellLinkedListWithParticleSort(100);
+            if (number_of_iterations % 100 == 0 && number_of_iterations != 1)
+            {
+                particle_sorting.exec();
+            }
+            water_block.updateCellLinkedList();
             water_block_complex.updateConfiguration();
             fluid_observer_contact.updateConfiguration();
             write_recorded_water_pressure.writeToFile(number_of_iterations);

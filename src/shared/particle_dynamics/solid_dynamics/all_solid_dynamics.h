@@ -30,11 +30,12 @@
 #pragma once
 
 #include "all_contact_dynamics.h"
-#include "constraint_dynamics.h"
+#include "constraint_dynamics.hpp"
 #include "elastic_dynamics.h"
 #include "fluid_structure_interaction.hpp"
 #include "general_solid_dynamics.h"
 #include "inelastic_dynamics.h"
 #include "loading_dynamics.h"
+#include "solid_dynamics_variable.h"
 #include "thin_structure_dynamics.h"
 #include "thin_structure_math.h"

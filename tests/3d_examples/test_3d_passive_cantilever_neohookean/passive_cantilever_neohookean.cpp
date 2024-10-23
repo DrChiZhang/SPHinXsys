@@ -40,20 +40,7 @@ class Cantilever : public ComplexShape
         add<TransformShape<GeometricShapeBox>>(Transform(translation_holder), halfsize_holder);
     }
 };
-/**
- * define time dependent gravity
- */
-class TimeDependentGravity : public Gravity
-{
-  public:
-    explicit TimeDependentGravity(Vecd gravity_vector)
-        : Gravity(gravity_vector) {}
-    virtual Vecd InducedAcceleration(const Vecd &position) override
-    {
-        Real current_time = GlobalStaticVariables::physical_time_;
-        return current_time < time_to_full_gravity ? current_time * global_acceleration_ / time_to_full_gravity : global_acceleration_;
-    }
-};
+
 /**
  *  The main program
  */
@@ -68,52 +55,46 @@ int main(int ac, char *av[])
 
     /** create a Cantilever body, corresponding material, particles and reaction model. */
     SolidBody cantilever_body(sph_system, makeShared<Cantilever>("CantileverBody"));
-    cantilever_body.defineParticlesAndMaterial<ElasticSolidParticles, NeoHookeanSolid>(rho0_s, Youngs_modulus, poisson);
-    cantilever_body.generateParticles<ParticleGeneratorLattice>();
+    cantilever_body.defineMaterial<NeoHookeanSolid>(rho0_s, Youngs_modulus, poisson);
+    cantilever_body.generateParticles<BaseParticles, Lattice>();
     /** Define Observer. */
     ObserverBody cantilever_observer(sph_system, "CantileverObserver");
-    cantilever_observer.generateParticles<ParticleGeneratorObserver>(observation_location);
+    cantilever_observer.generateParticles<ObserverParticles>(observation_location);
 
     /** topology */
     InnerRelation cantilever_body_inner(cantilever_body);
     ContactRelation cantilever_observer_contact(cantilever_observer, {&cantilever_body});
 
     //-------- common particle dynamics ----------------------------------------
-    TimeDependentGravity gravity(Vec3d(0.0, -gravity_g, 0.0));
-    SimpleDynamics<GravityForce> apply_time_dependent_gravity(cantilever_body, gravity);
+    IncreaseToFullGravity gravity(Vec3d(0.0, -gravity_g, 0.0), time_to_full_gravity);
+    SimpleDynamics<GravityForce<IncreaseToFullGravity>> apply_time_dependent_gravity(cantilever_body, gravity);
 
     /**
      * This section define all numerical methods will be used in this case.
      */
     /** Corrected configuration. */
-    InteractionWithUpdate<KernelCorrectionMatrixInner>
-        corrected_configuration(cantilever_body_inner);
-    /** Time step size calculation. */
-    ReduceDynamics<solid_dynamics::AcousticTimeStepSize>
-        computing_time_step_size(cantilever_body);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> corrected_configuration(cantilever_body_inner);
     /** active and passive stress relaxation. */
-    Dynamics1Level<solid_dynamics::Integration1stHalfPK2>
-        stress_relaxation_first_half(cantilever_body_inner);
-    /** Setup the damping stress, if you know what you are doing. */
-    // stress_relaxation_first_step.setupDampingStressFactor(1.0);
-    Dynamics1Level<solid_dynamics::Integration2ndHalf>
-        stress_relaxation_second_half(cantilever_body_inner);
+    Dynamics1Level<solid_dynamics::Integration1stHalfPK2> stress_relaxation_first_half(cantilever_body_inner);
+    Dynamics1Level<solid_dynamics::Integration2ndHalf> stress_relaxation_second_half(cantilever_body_inner);
+    /** Time step size calculation. */
+    ReduceDynamics<solid_dynamics::AcousticTimeStep> computing_time_step_size(cantilever_body);
     /** Constrain the holder. */
-    BodyRegionByParticle holder(cantilever_body,
-                                makeShared<TransformShape<GeometricShapeBox>>(Transform(translation_holder), halfsize_holder, "Holder"));
-    SimpleDynamics<solid_dynamics::FixBodyPartConstraint> constraint_holder(holder);
-    DampingWithRandomChoice<InteractionSplit<DampingBySplittingInner<Vec3d>>>
+    TransformShape<GeometricShapeBox> holder_shape(Transform(translation_holder), halfsize_holder, "Holder");
+    BodyRegionByParticle holder(cantilever_body, holder_shape);
+    SimpleDynamics<FixBodyPartConstraint> constraint_holder(holder);
+    DampingWithRandomChoice<InteractionSplit<DampingProjectionInner<Vec3d, FixedDampingRate>>>
         muscle_damping(0.1, cantilever_body_inner, "Velocity", physical_viscosity);
     /** Output */
     IOEnvironment io_environment(sph_system);
-    BodyStatesRecordingToVtp write_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_states(sph_system);
     RegressionTestDynamicTimeWarping<ObservedQuantityRecording<Vecd>>
         write_displacement("Position", cantilever_observer_contact);
     /**
      * From here the time stepping begins.
      * Set the starting time.
      */
-    GlobalStaticVariables::physical_time_ = 0.0;
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     sph_system.initializeSystemCellLinkedLists();
     sph_system.initializeSystemConfigurations();
     corrected_configuration.exec();
@@ -130,7 +111,7 @@ int main(int ac, char *av[])
     /**
      * Main loop
      */
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_period)
@@ -138,7 +119,7 @@ int main(int ac, char *av[])
             if (ite % 100 == 0)
             {
                 std::cout << "N=" << ite << " Time: "
-                          << GlobalStaticVariables::physical_time_ << "	dt: "
+                          << physical_time << "	dt: "
                           << dt << "\n";
             }
 
@@ -152,7 +133,7 @@ int main(int ac, char *av[])
             ite++;
             dt = computing_time_step_size.exec();
             integration_time += dt;
-            GlobalStaticVariables::physical_time_ += dt;
+            physical_time += dt;
         }
         write_displacement.writeToFile(ite);
         TickCount t2 = TickCount::now();

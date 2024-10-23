@@ -49,23 +49,22 @@ class MuscleBlock : public MultiPolygonShape
 //----------------------------------------------------------------------
 //	Application dependent initial condition.
 //----------------------------------------------------------------------
-class DepolarizationInitialCondition
-    : public electro_physiology::ElectroPhysiologyInitialCondition
+class DepolarizationInitialCondition : public LocalDynamics
 {
-  protected:
-    size_t voltage_;
-
   public:
     explicit DepolarizationInitialCondition(SPHBody &sph_body)
-        : electro_physiology::ElectroPhysiologyInitialCondition(sph_body)
-    {
-        voltage_ = particles_->diffusion_reaction_material_.AllSpeciesIndexMap()["Voltage"];
-    };
+        : LocalDynamics(sph_body),
+          pos_(particles_->getVariableDataByName<Vecd>("Position")),
+          voltage_(particles_->registerStateVariable<Real>("Voltage")){};
 
     void update(size_t index_i, Real dt)
     {
-        all_species_[voltage_][index_i] = exp(-4.0 * ((pos_[index_i][0] - 1.0) * (pos_[index_i][0] - 1.0) + pos_[index_i][1] * pos_[index_i][1]));
+        voltage_[index_i] = exp(-4.0 * ((pos_[index_i][0] - 1.0) * (pos_[index_i][0] - 1.0) + pos_[index_i][1] * pos_[index_i][1]));
     };
+
+  protected:
+    Vecd *pos_;
+    Real *voltage_;
 };
 //----------------------------------------------------------------------
 //	Main program starts here.
@@ -81,13 +80,14 @@ int main(int ac, char *av[])
     //	Creating body, materials and particles.
     //----------------------------------------------------------------------
     SolidBody muscle_body(sph_system, makeShared<MuscleBlock>("MuscleBlock"));
-    SharedPtr<AlievPanfilowModel> muscle_reaction_model_ptr = makeShared<AlievPanfilowModel>(k_a, c_m, k, a, b, mu_1, mu_2, epsilon);
-    muscle_body.defineParticlesAndMaterial<ElectroPhysiologyParticles, MonoFieldElectroPhysiology>(
-        muscle_reaction_model_ptr, TypeIdentity<DirectionalDiffusion>(), diffusion_coeff, bias_coeff, fiber_direction);
-    muscle_body.generateParticles<ParticleGeneratorLattice>();
+    AlievPanfilowModel muscle_reaction_model(k_a, c_m, k, a, b, mu_1, mu_2, epsilon);
+    MonoFieldElectroPhysiology<DirectionalDiffusion> *mono_field_electro_physiology =
+        muscle_body.defineMaterial<MonoFieldElectroPhysiology<DirectionalDiffusion>>(
+            muscle_reaction_model, diffusion_coeff, bias_coeff, fiber_direction);
+    muscle_body.generateParticles<BaseParticles, Lattice>();
 
     ObserverBody voltage_observer(sph_system, "VoltageObserver");
-    voltage_observer.generateParticles<ParticleGeneratorObserver>(observation_location);
+    voltage_observer.generateParticles<ObserverParticles>(observation_location);
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -103,17 +103,18 @@ int main(int ac, char *av[])
     //	Note that there may be data dependence on the constructors of these methods.
     //----------------------------------------------------------------------
     SimpleDynamics<DepolarizationInitialCondition> initialization(muscle_body);
-    InteractionWithUpdate<KernelCorrectionMatrixInner> correct_configuration(muscle_body_inner_relation);
-    electro_physiology::GetElectroPhysiologyTimeStepSize get_time_step_size(muscle_body);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> correct_configuration(muscle_body_inner_relation);
+    GetDiffusionTimeStepSize get_time_step_size(muscle_body, *mono_field_electro_physiology);
     // Diffusion process for diffusion body.
-    electro_physiology::ElectroPhysiologyDiffusionInnerRK2 diffusion_relaxation(muscle_body_inner_relation);
+    electro_physiology::ElectroPhysiologyDiffusionInnerRK2<DirectionalDiffusion>
+        diffusion_relaxation(muscle_body_inner_relation, mono_field_electro_physiology->AllDiffusions());
     // Solvers for ODE system or reactions
-    electro_physiology::ElectroPhysiologyReactionRelaxationForward reaction_relaxation_forward(muscle_body);
-    electro_physiology::ElectroPhysiologyReactionRelaxationBackward reaction_relaxation_backward(muscle_body);
+    electro_physiology::ElectroPhysiologyReactionRelaxationForward reaction_relaxation_forward(muscle_body, muscle_reaction_model);
+    electro_physiology::ElectroPhysiologyReactionRelaxationBackward reaction_relaxation_backward(muscle_body, muscle_reaction_model);
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations and observations of the simulation.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp write_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_states(sph_system);
     RegressionTestEnsembleAverage<ObservedQuantityRecording<Real>>
         write_recorded_voltage("Voltage", voltage_observer_contact_relation);
     //----------------------------------------------------------------------
@@ -132,6 +133,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Setup for time-stepping control
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     int ite = 0;
     Real T0 = 16.0;
     Real end_time = T0;
@@ -146,7 +148,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_interval)
@@ -157,7 +159,7 @@ int main(int ac, char *av[])
                 if (ite % 1000 == 0)
                 {
                     std::cout << "N=" << ite << " Time: "
-                              << GlobalStaticVariables::physical_time_ << "	dt: "
+                              << physical_time << "	dt: "
                               << dt << "\n";
                 }
                 /**Strang splitting method. */
@@ -169,7 +171,7 @@ int main(int ac, char *av[])
                 dt = get_time_step_size.exec();
                 relaxation_time += dt;
                 integration_time += dt;
-                GlobalStaticVariables::physical_time_ += dt;
+                physical_time += dt;
             }
             write_recorded_voltage.writeToFile(ite);
         }

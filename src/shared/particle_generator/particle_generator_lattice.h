@@ -31,13 +31,13 @@
 #define PARTICLE_GENERATOR_LATTICE_H
 
 #include "base_particle_generator.h"
-
+#include "particle_generator_reserve.h"
 namespace SPH
 {
 
 class Shape;
 class ParticleRefinementByShape;
-class ShellParticles;
+class SurfaceParticles;
 
 template <> // Base class for generating particles from lattice positions
 class GeneratingMethod<Lattice>
@@ -49,43 +49,41 @@ class GeneratingMethod<Lattice>
   protected:
     Real lattice_spacing_;      /**< Initial particle spacing. */
     BoundingBox domain_bounds_; /**< Domain bounds. */
-    Shape &initial_shape_;         /**< Geometry shape for body. */
+    Shape &initial_shape_;      /**< Geometry shape for body. */
 };
 
 template <>
-class ParticleGenerator<Lattice>
-    : public ParticleGenerator<Base>, public GeneratingMethod<Lattice>
+class ParticleGenerator<BaseParticles, Lattice>
+    : public ParticleGenerator<BaseParticles>, public GeneratingMethod<Lattice>
 {
   public:
-    explicit ParticleGenerator(SPHBody &sph_body);
+    explicit ParticleGenerator(SPHBody &sph_body, BaseParticles &base_particles);
     virtual ~ParticleGenerator(){};
-    virtual void initializeGeometricVariables() override;
+    virtual void prepareGeometricData() override;
 };
-using ParticleGeneratorLattice = ParticleGenerator<Lattice>;
 
 template <> // For generating particles with adaptive resolution from lattice positions
-class ParticleGenerator<Lattice, Adaptive> : public ParticleGenerator<Lattice>
+class ParticleGenerator<BaseParticles, Lattice, Adaptive> : public ParticleGenerator<BaseParticles, Lattice>
 {
   public:
-    ParticleGenerator(SPHBody &sph_body, Shape &target_shape);
-    explicit ParticleGenerator(SPHBody &sph_body);
+    ParticleGenerator(SPHBody &sph_body, BaseParticles &base_particles, Shape &target_shape);
+    explicit ParticleGenerator(SPHBody &sph_body, BaseParticles &base_particles);
     virtual ~ParticleGenerator(){};
 
   protected:
     Shape &target_shape_;
     ParticleRefinementByShape *particle_adaptation_;
-    virtual void initializePositionAndVolumetricMeasure(const Vecd &position, Real volume) override;
+    virtual void addPositionAndVolumetricMeasure(const Vecd &position, Real volume) override;
 };
-using ParticleGeneratorAdaptive = ParticleGenerator<Lattice, Adaptive>;
 
 template <> // For generating surface particles from lattice positions using reduced order approach
-class ParticleGenerator<Surface, Lattice, ReducedOrder>
-    : public ParticleGenerator<Surface>, public GeneratingMethod<Lattice>
+class ParticleGenerator<SurfaceParticles, Lattice>
+    : public ParticleGenerator<SurfaceParticles>, public GeneratingMethod<Lattice>
 {
   public:
-    ParticleGenerator(SPHBody &sph_body, Real thickness);
+    ParticleGenerator(SPHBody &sph_body, SurfaceParticles &surface_particles, Real thickness);
     virtual ~ParticleGenerator(){};
-    virtual void initializeGeometricVariables() override;
+    virtual void prepareGeometricData() override;
 
   protected:
     Real total_volume_;                  /**< Total volume of body calculated from level set. */
@@ -95,6 +93,5 @@ class ParticleGenerator<Surface, Lattice, ReducedOrder>
     size_t all_cells_;                   /**< Number of cells enclosed by the volume. */
     size_t planned_number_of_particles_; /**< Number of particles in planned manner. */
 };
-using ParticleGeneratorThickSurface = ParticleGenerator<Surface, Lattice, ReducedOrder>;
 } // namespace SPH
 #endif // PARTICLE_GENERATOR_LATTICE_H

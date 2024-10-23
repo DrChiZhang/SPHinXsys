@@ -6,9 +6,9 @@ namespace SPH
 //=================================================================================================//
 VelocityBoundCheck::
     VelocityBoundCheck(SPHBody &sph_body, Real velocity_bound)
-    : LocalDynamicsReduce<bool, ReduceOR>(sph_body, false),
-      GeneralDataDelegateSimple(sph_body),
-      vel_(particles_->vel_), velocity_bound_(velocity_bound) {}
+    : LocalDynamicsReduce<ReduceOR>(sph_body),
+      vel_(particles_->getVariableDataByName<Vecd>("Velocity")),
+      velocity_bound_(velocity_bound) {}
 //=================================================================================================//
 bool VelocityBoundCheck::reduce(size_t index_i, Real dt)
 {
@@ -16,9 +16,8 @@ bool VelocityBoundCheck::reduce(size_t index_i, Real dt)
 }
 //=================================================================================================//
 MaximumSpeed::MaximumSpeed(SPHBody &sph_body)
-    : LocalDynamicsReduce<Real, ReduceMax>(sph_body, Real(0)),
-      GeneralDataDelegateSimple(sph_body),
-      vel_(particles_->vel_)
+    : LocalDynamicsReduce<ReduceMax>(sph_body),
+      vel_(particles_->getVariableDataByName<Vecd>("Velocity"))
 {
     quantity_name_ = "MaximumSpeed";
 }
@@ -29,9 +28,8 @@ Real MaximumSpeed::reduce(size_t index_i, Real dt)
 }
 //=================================================================================================//
 PositionLowerBound::PositionLowerBound(SPHBody &sph_body)
-    : LocalDynamicsReduce<Vecd, ReduceLowerBound>(sph_body, MaxReal * Vecd::Ones()),
-      GeneralDataDelegateSimple(sph_body),
-      pos_(particles_->pos_)
+    : LocalDynamicsReduce<ReduceLowerBound>(sph_body),
+      pos_(particles_->getVariableDataByName<Vecd>("Position"))
 {
     quantity_name_ = "PositionLowerBound";
 }
@@ -42,9 +40,8 @@ Vecd PositionLowerBound::reduce(size_t index_i, Real dt)
 }
 //=================================================================================================//
 PositionUpperBound::PositionUpperBound(SPHBody &sph_body)
-    : LocalDynamicsReduce<Vecd, ReduceUpperBound>(sph_body, MinReal * Vecd::Ones()),
-      GeneralDataDelegateSimple(sph_body),
-      pos_(particles_->pos_)
+    : LocalDynamicsReduce<ReduceUpperBound>(sph_body),
+      pos_(particles_->getVariableDataByName<Vecd>("Position"))
 {
     quantity_name_ = "PositionUpperBound";
 }
@@ -55,9 +52,9 @@ Vecd PositionUpperBound::reduce(size_t index_i, Real dt)
 }
 //=================================================================================================//
 TotalKineticEnergy::TotalKineticEnergy(SPHBody &sph_body)
-    : LocalDynamicsReduce<Real, ReduceSum<Real>>(sph_body, Real(0)),
-      GeneralDataDelegateSimple(sph_body),
-      mass_(particles_->mass_), vel_(particles_->vel_)
+    : LocalDynamicsReduce<ReduceSum<Real>>(sph_body),
+      mass_(particles_->getVariableDataByName<Real>("Mass")),
+      vel_(particles_->getVariableDataByName<Vecd>("Velocity"))
 {
     quantity_name_ = "TotalKineticEnergy";
 }
@@ -69,7 +66,8 @@ Real TotalKineticEnergy::reduce(size_t index_i, Real dt)
 //=================================================================================================//
 TotalMechanicalEnergy::TotalMechanicalEnergy(SPHBody &sph_body, Gravity &gravity)
     : TotalKineticEnergy(sph_body),
-      gravity_(gravity), pos_(particles_->pos_)
+      gravity_(gravity),
+      pos_(particles_->getVariableDataByName<Vecd>("Position"))
 {
     quantity_name_ = "TotalMechanicalEnergy";
 }

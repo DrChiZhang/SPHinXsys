@@ -43,12 +43,16 @@ Real Youngs_modulus = 210e6;                 /** Normalized Youngs Modulus. */
 Real poisson = 0.3;                          /** Poisson ratio. */
 Real physical_viscosity = 200.0 * thickness; /** physical damping, here we choose the same value as numerical viscosity. */
 
+namespace SPH
+{
 /** Define application dependent particle generator for thin structure. */
-class CylinderParticleGenerator : public ParticleGeneratorSurface
+class Cylinder;
+template <>
+class ParticleGenerator<SurfaceParticles, Cylinder> : public ParticleGenerator<SurfaceParticles>
 {
   public:
-    explicit CylinderParticleGenerator(SPHBody &sph_body) : ParticleGeneratorSurface(sph_body){};
-    virtual void initializeGeometricVariables() override
+    explicit ParticleGenerator(SPHBody &sph_body, SurfaceParticles &surface_particles) : ParticleGenerator<SurfaceParticles>(sph_body, surface_particles){};
+    virtual void prepareGeometricData() override
     {
         // the cylinder and boundary
         for (int i = 0; i < particle_number_mid_surface + 2 * BWD; i++)
@@ -61,8 +65,8 @@ class CylinderParticleGenerator : public ParticleGeneratorSurface
                 Vecd position = rotation_matrix * Vecd(x, y, z);
                 Vec3d n_0 = rotation_matrix * Vec3d(x / radius_mid_surface, 0.0, z / radius_mid_surface);
 
-                initializePositionAndVolumetricMeasure(position, particle_spacing_ref * particle_spacing_ref);
-                initializeSurfaceProperties(n_0, thickness);
+                addPositionAndVolumetricMeasure(position, particle_spacing_ref * particle_spacing_ref);
+                addSurfaceProperties(n_0, thickness);
             }
         }
     }
@@ -83,7 +87,7 @@ class DisControlGeometry : public BodyPartByParticle
   private:
     void tagManually(size_t index_i)
     {
-        Vecd pos_before_rotation = rotation_matrix.transpose() * base_particles_.pos_[index_i];
+        Vecd pos_before_rotation = rotation_matrix.transpose() * base_particles_.ParticlePositions()[index_i];
         if (pos_before_rotation[0] < 0.5 * particle_spacing_ref && pos_before_rotation[0] > -0.5 * particle_spacing_ref)
         {
             body_part_particles_.push_back(index_i);
@@ -97,11 +101,11 @@ class ControlDisplacement : public thin_structure_dynamics::ConstrainShellBodyRe
   public:
     ControlDisplacement(BodyPartByParticle &body_part)
         : ConstrainShellBodyRegion(body_part),
-          vel_(particles_->vel_){};
+          vel_(particles_->getVariableDataByName<Vecd>("Velocity")){};
     virtual ~ControlDisplacement(){};
 
   protected:
-    StdLargeVec<Vecd> &vel_;
+    Vecd *vel_;
 
     void update(size_t index_i, Real dt = 0.0)
     {
@@ -124,12 +128,13 @@ class BoundaryGeometry : public BodyPartByParticle
   private:
     void tagManually(size_t index_i)
     {
-        if (base_particles_.pos_[index_i][2] < radius_mid_surface * (Real)sin(-17.5 / 180.0 * Pi))
+        if (base_particles_.ParticlePositions()[index_i][2] < radius_mid_surface * (Real)sin(-17.5 / 180.0 * Pi))
         {
             body_part_particles_.push_back(index_i);
         }
     };
 };
+} // namespace SPH
 
 /**
  *  The main program
@@ -144,12 +149,12 @@ int main(int ac, char *av[])
     IOEnvironment io_environment(sph_system);
     /** create a cylinder body with shell particles and linear elasticity. */
     SolidBody cylinder_body(sph_system, makeShared<DefaultShape>("CylinderBody"));
-    cylinder_body.defineParticlesAndMaterial<ShellParticles, SaintVenantKirchhoffSolid>(rho0_s, Youngs_modulus, poisson);
-    cylinder_body.generateParticles<CylinderParticleGenerator>();
+    cylinder_body.defineMaterial<SaintVenantKirchhoffSolid>(rho0_s, Youngs_modulus, poisson);
+    cylinder_body.generateParticles<SurfaceParticles, Cylinder>();
 
     /** Define Observer. */
     ObserverBody cylinder_observer(sph_system, "CylinderObserver");
-    cylinder_observer.generateParticles<ParticleGeneratorObserver>(observation_location);
+    cylinder_observer.generateParticles<ObserverParticles>(observation_location);
 
     /** Set body contact map
      *  The contact map gives the data connections between the bodies
@@ -161,26 +166,23 @@ int main(int ac, char *av[])
     /**
      * This section define all numerical methods will be used in this case.
      */
-    /** Corrected configuration. */
-    InteractionDynamics<thin_structure_dynamics::ShellCorrectConfiguration>
-        corrected_configuration(cylinder_body_inner);
-    /** Time step size calculation. */
-    ReduceDynamics<thin_structure_dynamics::ShellAcousticTimeStepSize> computing_time_step_size(cylinder_body);
-    /** stress relaxation. */
+    InteractionDynamics<thin_structure_dynamics::ShellCorrectConfiguration> corrected_configuration(cylinder_body_inner);
+
+    /** the main shell dynamics model. */
     Dynamics1Level<thin_structure_dynamics::ShellStressRelaxationFirstHalf> stress_relaxation_first_half(cylinder_body_inner);
     Dynamics1Level<thin_structure_dynamics::ShellStressRelaxationSecondHalf> stress_relaxation_second_half(cylinder_body_inner);
-    /** Control the displacement. */
+
+    ReduceDynamics<thin_structure_dynamics::ShellAcousticTimeStepSize> computing_time_step_size(cylinder_body);
     DisControlGeometry dis_control_geometry(cylinder_body, "DisControlGeometry");
     SimpleDynamics<ControlDisplacement> dis_control(dis_control_geometry);
-    /** Constrain the Boundary. */
     BoundaryGeometry boundary_geometry(cylinder_body, "BoundaryGeometry");
     SimpleDynamics<thin_structure_dynamics::ConstrainShellBodyRegion> constrain_holder(boundary_geometry);
-    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vecd>>>
+    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vecd, FixedDampingRate>>>
         cylinder_position_damping(0.2, cylinder_body_inner, "Velocity", physical_viscosity);
-    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vecd>>>
+    DampingWithRandomChoice<InteractionSplit<DampingPairwiseInner<Vecd, FixedDampingRate>>>
         cylinder_rotation_damping(0.2, cylinder_body_inner, "AngularVelocity", physical_viscosity);
     /** Output */
-    BodyStatesRecordingToVtp write_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_states(sph_system);
     RegressionTestDynamicTimeWarping<ObservedQuantityRecording<Vecd>>
         write_cylinder_max_displacement("Position", cylinder_observer_contact);
 
@@ -193,11 +195,11 @@ int main(int ac, char *av[])
      * From here the time stepping begins.
      * Set the starting time.
      */
-    GlobalStaticVariables::physical_time_ = 0.0;
     write_states.writeToFile(0);
     write_cylinder_max_displacement.writeToFile(0);
 
     /** Setup time stepping control parameters. */
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     int ite = 0;
     Real end_time = 0.0048;
     Real output_period = end_time / 200.0;
@@ -208,7 +210,7 @@ int main(int ac, char *av[])
     /**
      * Main loop
      */
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integral_time = 0.0;
         while (integral_time < output_period)
@@ -216,7 +218,7 @@ int main(int ac, char *av[])
             if (ite % 100 == 0)
             {
                 std::cout << "N=" << ite << " Time: "
-                          << GlobalStaticVariables::physical_time_ << "	dt: "
+                          << physical_time << "	dt: "
                           << dt << "\n";
             }
             stress_relaxation_first_half.exec(dt);
@@ -231,7 +233,7 @@ int main(int ac, char *av[])
             ite++;
             dt = computing_time_step_size.exec();
             integral_time += dt;
-            GlobalStaticVariables::physical_time_ += dt;
+            physical_time += dt;
         }
         write_cylinder_max_displacement.writeToFile(ite);
         TickCount t2 = TickCount::now();

@@ -46,8 +46,9 @@ class InnerRelation : public BaseInnerRelation
 
   public:
     explicit InnerRelation(RealBody &real_body);
-    virtual ~InnerRelation(){};
+    virtual ~InnerRelation() {};
 
+    CellLinkedList &getCellLinkedList() { return cell_linked_list_; };
     virtual void updateConfiguration() override;
 };
 
@@ -68,7 +69,7 @@ class AdaptiveInnerRelation : public BaseInnerRelation
 
   public:
     explicit AdaptiveInnerRelation(RealBody &real_body);
-    virtual ~AdaptiveInnerRelation(){};
+    virtual ~AdaptiveInnerRelation() {};
 
     virtual void updateConfiguration() override;
 };
@@ -83,7 +84,7 @@ class SelfSurfaceContactRelation : public BaseInnerRelation
     BodySurfaceLayer body_surface_layer_;
 
     explicit SelfSurfaceContactRelation(RealBody &real_body);
-    virtual ~SelfSurfaceContactRelation(){};
+    virtual ~SelfSurfaceContactRelation() {};
     virtual void updateConfiguration() override;
 
   protected:
@@ -107,9 +108,42 @@ class TreeInnerRelation : public InnerRelation
 
   public:
     explicit TreeInnerRelation(RealBody &real_body);
-    virtual ~TreeInnerRelation(){};
+    virtual ~TreeInnerRelation() {};
 
     virtual void updateConfiguration() override;
+};
+
+/**
+ * @class ShellInnerRelationWithContactKernel
+ * @brief Shell inner relation with the cut-off radius of the contact body
+ *  This class is used in fluid-shell interaction problems to compute shell curvature with the cut-off radius of fluid
+ */
+class ShellInnerRelationWithContactKernel : public BaseInnerRelation
+{
+  private:
+    CellLinkedList &cell_linked_list_;
+    SearchDepthContact get_contact_search_depth_;
+    ShellNeighborBuilderInnerWithContactKernel get_inner_neighbor_with_contact_kernel_;
+
+  public:
+    explicit ShellInnerRelationWithContactKernel(RealBody &real_body, RealBody &contact_body);
+    void updateConfiguration() override;
+};
+
+/**
+ * @class ShellSelfContactRelation
+ * @brief The relation for self contact of a shell
+ */
+class ShellSelfContactRelation : public BaseInnerRelation
+{
+  public:
+    explicit ShellSelfContactRelation(RealBody &real_body);
+    void updateConfiguration() override;
+
+  private:
+    SearchDepthSingleResolution get_single_search_depth_;
+    NeighborBuilderShellSelfContact get_shell_self_contact_neighbor_;
+    CellLinkedList &cell_linked_list_;
 };
 } // namespace SPH
 #endif // INNER_BODY_RELATION_H

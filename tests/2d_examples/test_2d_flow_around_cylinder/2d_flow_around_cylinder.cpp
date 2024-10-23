@@ -29,19 +29,19 @@ int main(int ac, char *av[])
     //	Creating body, materials and particles.
     //----------------------------------------------------------------------
     FluidBody water_block(sph_system, makeShared<WaterBlock>("WaterBlock"));
-    water_block.defineParticlesAndMaterial<BaseParticles, ParameterizedWaterMaterial>(parameterization_io, rho0_f, c_f, mu_f);
-    water_block.generateParticles<ParticleGeneratorLattice>();
+    water_block.defineMaterial<ParameterizedWaterMaterial>(parameterization_io, rho0_f, c_f, mu_f);
+    water_block.generateParticles<BaseParticles, Lattice>();
 
     SolidBody cylinder(sph_system, makeShared<Cylinder>("Cylinder"));
     cylinder.defineAdaptationRatios(1.15, 2.0);
     cylinder.defineBodyLevelSetShape();
-    cylinder.defineParticlesAndMaterial<SolidParticles, Solid>();
+    cylinder.defineMaterial<Solid>();
     (!sph_system.RunParticleRelaxation() && sph_system.ReloadParticles())
-        ? cylinder.generateParticles<ParticleGeneratorReload>(cylinder.getName())
-        : cylinder.generateParticles<ParticleGeneratorLattice>();
+        ? cylinder.generateParticles<BaseParticles, Reload>(cylinder.getName())
+        : cylinder.generateParticles<BaseParticles, Lattice>();
 
     ObserverBody fluid_observer(sph_system, "FluidObserver");
-    fluid_observer.generateParticles<ParticleGeneratorObserver>(observation_locations);
+    fluid_observer.generateParticles<ObserverParticles>(observation_locations);
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -73,7 +73,7 @@ int main(int ac, char *av[])
         /** Random reset the insert body particle position. */
         SimpleDynamics<RandomizeParticlePosition> random_inserted_body_particles(cylinder);
         /** Write the body state to Vtp file. */
-        BodyStatesRecordingToVtp write_inserted_body_to_vtp({&cylinder});
+        BodyStatesRecordingToVtp write_inserted_body_to_vtp(cylinder);
         /** Write the particle reload files. */
         ReloadParticleIO write_particle_reload_files(cylinder);
         /** A  Physics relaxation step. */
@@ -107,13 +107,18 @@ int main(int ac, char *av[])
     //	Note that there may be data dependence on the constructors of these methods.
     //----------------------------------------------------------------------
     SimpleDynamics<NormalDirectionFromBodyShape> cylinder_normal_direction(cylinder);
-    PeriodicConditionUsingCellLinkedList periodic_condition_x(water_block, water_block.getBodyShapeBounds(), xAxis);
-    PeriodicConditionUsingCellLinkedList periodic_condition_y(water_block, water_block.getBodyShapeBounds(), yAxis);
-    InteractionWithUpdate<fluid_dynamics::DensitySummationComplex> update_density_by_summation(water_block_inner, water_block_contact);
-    ReduceDynamics<fluid_dynamics::AdvectionTimeStepSize> get_fluid_advection_time_step_size(water_block, U_f);
-    ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> get_fluid_time_step_size(water_block);
+
     Dynamics1Level<fluid_dynamics::Integration1stHalfWithWallRiemann> pressure_relaxation(water_block_inner, water_block_contact);
     Dynamics1Level<fluid_dynamics::Integration2ndHalfWithWallNoRiemann> density_relaxation(water_block_inner, water_block_contact);
+    InteractionWithUpdate<fluid_dynamics::DensitySummationComplex> update_density_by_summation(water_block_inner, water_block_contact);
+
+    PeriodicAlongAxis periodic_along_x(water_block.getSPHBodyBounds(), xAxis);
+    PeriodicAlongAxis periodic_along_y(water_block.getSPHBodyBounds(), yAxis);
+    PeriodicConditionUsingCellLinkedList periodic_condition_x(water_block, periodic_along_x);
+    PeriodicConditionUsingCellLinkedList periodic_condition_y(water_block, periodic_along_y);
+    ReduceDynamics<fluid_dynamics::AdvectionViscousTimeStep> get_fluid_advection_time_step_size(water_block, U_f);
+    ReduceDynamics<fluid_dynamics::AcousticTimeStep> get_fluid_time_step_size(water_block);
+
     InteractionWithUpdate<fluid_dynamics::ViscousForceWithWall> viscous_force(water_block_inner, water_block_contact);
     InteractionWithUpdate<fluid_dynamics::TransportVelocityCorrectionComplex<AllParticles>> transport_velocity_correction(water_block_inner, water_block_contact);
     InteractionDynamics<fluid_dynamics::VorticityInner> compute_vorticity(water_block_inner);
@@ -124,12 +129,15 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     /** Compute the force exerted on solid body due to fluid pressure and viscosity. */
     InteractionWithUpdate<solid_dynamics::ViscousForceFromFluid> viscous_force_on_cylinder(cylinder_contact);
-    InteractionWithUpdate<solid_dynamics::PressureForceFromFluid> pressure_force_on_cylinder(cylinder_contact);
-    /** Computing viscous force acting on wall with wall model. */
+    InteractionWithUpdate<solid_dynamics::PressureForceFromFluid<decltype(density_relaxation)>> pressure_force_on_cylinder(cylinder_contact);
+    //----------------------------------------------------------------------
+    //	Define the configuration related particles dynamics.
+    //----------------------------------------------------------------------
+    ParticleSorting particle_sorting(water_block);
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations and observations of the simulation.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp write_real_body_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_real_body_states(sph_system);
     RegressionTestDynamicTimeWarping<ReducedQuantityRecording<QuantitySummation<Vecd>>> write_total_viscous_force_from_fluid(cylinder, "ViscousForceFromFluid");
     ReducedQuantityRecording<QuantitySummation<Vecd>> write_total_pressure_force_from_fluid(cylinder, "PressureForceFromFluid");
     ObservedQuantityRecording<Vecd> write_fluid_velocity("Velocity", fluid_observer_contact);
@@ -150,6 +158,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Setup computing and initial conditions.
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     size_t number_of_iterations = 0;
     int screen_output_interval = 100;
     Real end_time = 200.0;
@@ -166,7 +175,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
 
@@ -190,7 +199,7 @@ int main(int ac, char *av[])
 
                 relaxation_time += dt;
                 integration_time += dt;
-                GlobalStaticVariables::physical_time_ += dt;
+                physical_time += dt;
                 freestream_condition.exec();
                 inner_ite_dt++;
             }
@@ -198,7 +207,7 @@ int main(int ac, char *av[])
             if (number_of_iterations % screen_output_interval == 0)
             {
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
-                          << GlobalStaticVariables::physical_time_
+                          << physical_time
                           << "	Dt = " << Dt << "	Dt / dt = " << inner_ite_dt << "\n";
             }
             number_of_iterations++;
@@ -206,7 +215,11 @@ int main(int ac, char *av[])
             /** Water block configuration and periodic condition. */
             periodic_condition_x.bounding_.exec();
             periodic_condition_y.bounding_.exec();
-            water_block.updateCellLinkedListWithParticleSort(100);
+            if (number_of_iterations % 100 == 0 && number_of_iterations != 1)
+            {
+                particle_sorting.exec();
+            }
+            water_block.updateCellLinkedList();
             periodic_condition_x.update_cell_linked_list_.exec();
             periodic_condition_y.update_cell_linked_list_.exec();
             /** one need update configuration after periodic condition. */

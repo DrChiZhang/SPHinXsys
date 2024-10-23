@@ -335,7 +335,7 @@ class WallBoundary : public ComplexShape
 //----------------------------------------------------------------------
 //	Boundary condition for wave_maker
 //----------------------------------------------------------------------
-class WaveMaking : public solid_dynamics::MotionConstraint
+class WaveMaking : public BodyPartMotionConstraint
 {
     Real h;
     Real tf;
@@ -454,19 +454,26 @@ class WaveMaking : public solid_dynamics::MotionConstraint
 
   public:
     WaveMaking(BodyPartByParticle &body_part)
-        : solid_dynamics::MotionConstraint(body_part),
-          h(WH), tf(5), xf(4.5), fmn(0.32), fmx(0.96), a(0.0078), N(32), g(gravity_g)
+        : BodyPartMotionConstraint(body_part),
+          h(WH), tf(5), xf(4.5), fmn(0.32), fmx(0.96), a(0.0078), N(32), g(gravity_g),
+          acc_(particles_->registerStateVariable<Vecd>("Acceleration")),
+          physical_time_(sph_system_.getSystemVariableDataByName<Real>("PhysicalTime"))
+
     {
         ComputeWaveChar();
     }
 
     void update(size_t index_i, Real dt = 0.0)
     {
-        Real time = GlobalStaticVariables::physical_time_;
+        Real time = *physical_time_;
         pos_[index_i] = pos0_[index_i] + getDisplacement(time);
         vel_[index_i] = getVelocity(time);
-        force_[index_i] = mass_[index_i] * getAcceleration(time);
+        acc_[index_i] = getAcceleration(time);
     };
+
+  protected:
+    Vecd *acc_;
+    Real *physical_time_;
 };
 
 //----------------------------------------------------------------------

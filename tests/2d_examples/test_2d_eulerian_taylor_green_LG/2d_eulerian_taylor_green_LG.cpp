@@ -44,23 +44,12 @@ class WaterBlock : public MultiPolygonShape
 //----------------------------------------------------------------------
 //	Case-dependent initial condition.
 //----------------------------------------------------------------------
-class TaylorGreenInitialCondition
-    : public fluid_dynamics::FluidInitialCondition
+class TaylorGreenInitialCondition : public fluid_dynamics::CompressibleFluidInitialCondition
 {
   public:
     explicit TaylorGreenInitialCondition(SPHBody &sph_body)
-        : FluidInitialCondition(sph_body), pos_(particles_->pos_), vel_(particles_->vel_),
-          rho_(particles_->rho_), mass_(particles_->mass_), Vol_(particles_->Vol_),
-          p_(*particles_->getVariableByName<Real>("Pressure"))
-    {
-        particles_->registerVariable(mom_, "Momentum");
-        particles_->registerVariable(dmom_dt_, "MomentumChangeRate");
-        particles_->registerVariable(dmom_dt_prior_, "OtherMomentumChangeRate");
-        particles_->registerVariable(E_, "TotalEnergy");
-        particles_->registerVariable(dE_dt_, "TotalEnergyChangeRate");
-        particles_->registerVariable(dE_dt_prior_, "OtherEnergyChangeRate");
-        gamma_ = heat_capacity_ratio;
-    };
+        : fluid_dynamics::CompressibleFluidInitialCondition(sph_body){};
+    virtual ~TaylorGreenInitialCondition(){};
 
     void update(size_t index_i, Real dt)
     {
@@ -78,11 +67,7 @@ class TaylorGreenInitialCondition
     }
 
   protected:
-    StdLargeVec<Vecd> &pos_, &vel_;
-    StdLargeVec<Real> &rho_, &mass_, &Vol_, &p_;
-    StdLargeVec<Vecd> mom_, dmom_dt_, dmom_dt_prior_;
-    StdLargeVec<Real> E_, dE_dt_, dE_dt_prior_;
-    Real gamma_;
+    Real gamma_ = heat_capacity_ratio;
 };
 //----------------------------------------------------------------------
 //	Main program starts here.
@@ -99,8 +84,8 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     FluidBody water_body(sph_system, makeShared<WaterBlock>("WaterBody"));
     water_body.sph_adaptation_->resetKernel<KernelTabulated<KernelLaguerreGauss>>(20);
-    water_body.defineParticlesAndMaterial<BaseParticles, CompressibleFluid>(rho0_f, heat_capacity_ratio, mu_f);
-    water_body.generateParticles<ParticleGeneratorLattice>();
+    water_body.defineMaterial<CompressibleFluid>(rho0_f, heat_capacity_ratio, mu_f);
+    water_body.generateParticles<BaseParticles, Lattice>();
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -114,19 +99,22 @@ int main(int ac, char *av[])
     //	Define the main numerical methods used in the simulation.
     //	Note that there may be data dependence on the constructors of these methods.
     //----------------------------------------------------------------------
-    SimpleDynamics<TaylorGreenInitialCondition> initial_condition(water_body);
-    PeriodicConditionUsingCellLinkedList periodic_condition_x(water_body, water_body.getBodyShapeBounds(), xAxis);
-    PeriodicConditionUsingCellLinkedList periodic_condition_y(water_body, water_body.getBodyShapeBounds(), yAxis);
-    ReduceDynamics<fluid_dynamics::EulerianCompressibleAcousticTimeStepSize> get_fluid_time_step_size(water_body);
     InteractionWithUpdate<fluid_dynamics::EulerianCompressibleIntegration1stHalfHLLCWithLimiterRiemann> pressure_relaxation(water_body_inner);
     InteractionWithUpdate<fluid_dynamics::EulerianCompressibleIntegration2ndHalfHLLCWithLimiterRiemann> density_and_energy_relaxation(water_body_inner);
+
+    SimpleDynamics<TaylorGreenInitialCondition> initial_condition(water_body);
+    PeriodicAlongAxis periodic_along_x(water_body.getSPHBodyBounds(), xAxis);
+    PeriodicAlongAxis periodic_along_y(water_body.getSPHBodyBounds(), yAxis);
+    PeriodicConditionUsingCellLinkedList periodic_condition_x(water_body, periodic_along_x);
+    PeriodicConditionUsingCellLinkedList periodic_condition_y(water_body, periodic_along_y);
+    ReduceDynamics<fluid_dynamics::EulerianCompressibleAcousticTimeStepSize> get_fluid_time_step_size(water_body);
     InteractionWithUpdate<fluid_dynamics::ViscousForceInner> viscous_force(water_body_inner);
-    InteractionWithUpdate<KernelCorrectionMatrixInner> kernel_correction_matrix(water_body_inner);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> kernel_correction_matrix(water_body_inner);
     InteractionDynamics<KernelGradientCorrectionInner> kernel_gradient_update(water_body_inner);
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations and observations of the simulation.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp body_states_recording(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp body_states_recording(sph_system);
     RegressionTestEnsembleAverage<ReducedQuantityRecording<TotalKineticEnergy>> write_total_kinetic_energy(water_body);
     RegressionTestEnsembleAverage<ReducedQuantityRecording<MaximumSpeed>> write_maximum_speed(water_body);
     //----------------------------------------------------------------------
@@ -143,6 +131,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Setup for time-stepping control
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     size_t number_of_iterations = 0;
     int screen_output_interval = 100;
     Real end_time = 5.0;
@@ -160,7 +149,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         /** Integrate time (loop) until the next output time. */
@@ -172,12 +161,12 @@ int main(int ac, char *av[])
             integration_time += dt;
             pressure_relaxation.exec(dt);
             density_and_energy_relaxation.exec(dt);
-            GlobalStaticVariables::physical_time_ += dt;
+            physical_time += dt;
 
             if (number_of_iterations % screen_output_interval == 0)
             {
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
-                          << GlobalStaticVariables::physical_time_
+                          << physical_time
                           << "	dt = " << dt << "\n";
             }
             number_of_iterations++;

@@ -7,22 +7,40 @@
 namespace SPH
 {
 //=================================================================================================//
-SPHBody::SPHBody(SPHSystem &sph_system, SharedPtr<Shape> initial_shape_ptr, const std::string &body_name)
-    : sph_system_(sph_system), body_name_(body_name), newly_updated_(true), base_particles_(nullptr),
-      initial_shape_(initial_shape_ptr_keeper_.assignPtr(initial_shape_ptr)),
-      sph_adaptation_(sph_adaptation_ptr_keeper_.createPtr<SPHAdaptation>(*this)),
-      base_material_(nullptr)
+SPHBody::SPHBody(SPHSystem &sph_system, Shape &shape, const std::string &name)
+    : sph_system_(sph_system), body_name_(name), newly_updated_(true),
+      base_particles_(nullptr), is_bound_set_(false), initial_shape_(&shape), total_body_parts_(0),
+      sph_adaptation_(sph_adaptation_ptr_keeper_.createPtr<SPHAdaptation>(sph_system.ReferenceResolution())),
+      base_material_(base_material_ptr_keeper_.createPtr<BaseMaterial>())
 {
     sph_system_.sph_bodies_.push_back(this);
 }
 //=================================================================================================//
-SPHBody::SPHBody(SPHSystem &sph_system, SharedPtr<Shape> initial_shape_ptr)
-    : SPHBody(sph_system, initial_shape_ptr, initial_shape_ptr->getName()) {}
+SPHBody::SPHBody(SPHSystem &sph_system, Shape &shape)
+    : SPHBody(sph_system, shape, shape.getName()) {}
+//=================================================================================================//
+SPHBody::SPHBody(SPHSystem &sph_system, const std::string &name)
+    : SPHBody(sph_system, makeShared<DefaultShape>(name)) {}
+//=================================================================================================//
+SPHBody::SPHBody(SPHSystem &sph_system, SharedPtr<Shape> shape_ptr, const std::string &name)
+    : SPHBody(sph_system, *shape_ptr.get(), name)
+{
+    shape_ptr_keeper_.assignPtr(shape_ptr);
+}
+//=================================================================================================//
+SPHBody::SPHBody(SPHSystem &sph_system, SharedPtr<Shape> shape_ptr)
+    : SPHBody(sph_system, shape_ptr, shape_ptr->getName()) {}
 //=================================================================================================//
 BoundingBox SPHBody::getSPHSystemBounds()
 {
     return sph_system_.system_domain_bounds_;
 }
+//=================================================================================================//
+int SPHBody::getNewBodyPartID()
+{
+    total_body_parts_++;
+    return total_body_parts_;
+};
 //=================================================================================================//
 SPHSystem &SPHBody::getSPHSystem()
 {
@@ -51,42 +69,25 @@ BaseMaterial &SPHBody::getBaseMaterial()
     return *base_material_;
 };
 //=================================================================================================//
-void SPHBody::allocateConfigurationMemoriesForBufferParticles()
+void SPHBody::setSPHBodyBounds(const BoundingBox &bound)
 {
-    for (size_t i = 0; i < body_relations_.size(); i++)
-    {
-        body_relations_[i]->resizeConfiguration();
-    }
+    bound_ = bound;
+    is_bound_set_ = true;
 }
 //=================================================================================================//
-BoundingBox SPHBody::getBodyShapeBounds()
+BoundingBox SPHBody::getSPHBodyBounds()
 {
-    return initial_shape_->getBounds();
+    return is_bound_set_ ? bound_ : initial_shape_->getBounds();
+}
+//=================================================================================================//
+void SPHBody::registerComputingKernel(execution::Implementation<Base> *implementation)
+{
+    all_simple_reduce_computing_kernels_.push_back(implementation);
 }
 //=================================================================================================//
 void SPHBody::defineAdaptationRatios(Real h_spacing_ratio, Real new_system_refinement_ratio)
 {
     sph_adaptation_->resetAdaptationRatios(h_spacing_ratio, new_system_refinement_ratio);
-}
-//=================================================================================================//
-void SPHBody::writeParticlesToVtuFile(std::ostream &output_file)
-{
-    base_particles_->writeParticlesToVtk(output_file);
-}
-//=================================================================================================//
-void SPHBody::writeParticlesToVtpFile(std::ofstream &output_file)
-{
-    base_particles_->writeParticlesToVtk(output_file);
-}
-//=================================================================================================//
-void SPHBody::writeSurfaceParticlesToVtuFile(std::ofstream &output_file, BodySurface &surface_particles)
-{
-    base_particles_->writeSurfaceParticlesToVtuFile(output_file, surface_particles);
-}
-//=================================================================================================//
-void SPHBody::writeParticlesToPltFile(std::ofstream &output_file)
-{
-    base_particles_->writeParticlesToPltFile(output_file);
 }
 //=================================================================================================//
 void SPHBody::writeParticlesToXmlForRestart(std::string &filefullpath)
@@ -104,16 +105,12 @@ void SPHBody::writeToXmlForReloadParticle(std::string &filefullpath)
     base_particles_->writeToXmlForReloadParticle(filefullpath);
 }
 //=================================================================================================//
-void SPHBody::readFromXmlForReloadParticle(std::string &filefullpath)
-{
-    base_particles_->readFromXmlForReloadParticle(filefullpath);
-}
-//=================================================================================================//
 BaseCellLinkedList &RealBody::getCellLinkedList()
 {
     if (!cell_linked_list_created_)
     {
-        cell_linked_list_ptr_ = sph_adaptation_->createCellLinkedList(getSPHSystemBounds(), *this);
+        cell_linked_list_ptr_ =
+            sph_adaptation_->createCellLinkedList(getSPHSystemBounds(), *base_particles_);
         cell_linked_list_created_ = true;
     }
     return *cell_linked_list_ptr_.get();
@@ -122,18 +119,6 @@ BaseCellLinkedList &RealBody::getCellLinkedList()
 void RealBody::updateCellLinkedList()
 {
     getCellLinkedList().UpdateCellLists(*base_particles_);
-    base_particles_->total_ghost_particles_ = 0;
-}
-//=================================================================================================//
-void RealBody::updateCellLinkedListWithParticleSort(size_t particle_sorting_period)
-{
-    if (iteration_count_ % particle_sorting_period == 0)
-    {
-        base_particles_->sortParticles(getCellLinkedList());
-    }
-
-    iteration_count_++;
-    updateCellLinkedList();
 }
 //=================================================================================================//
 } // namespace SPH

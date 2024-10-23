@@ -51,13 +51,12 @@ int main(int ac, char *av[])
     RealBody airfoil(sph_system, makeShared<ImportModel>("AirFoil"));
     airfoil.defineAdaptation<ParticleRefinementNearSurface>(1.15, 1.0, 3);
     airfoil.defineBodyLevelSetShape()->cleanLevelSet()->writeLevelSet(sph_system);
-    airfoil.defineParticlesAndMaterial();
-    airfoil.generateParticles<ParticleGeneratorAdaptive>();
-    airfoil.addBodyStateForRecording<Real>("SmoothingLengthRatio");
+    airfoil.generateParticles<BaseParticles, Lattice, Adaptive>();
     //----------------------------------------------------------------------
     //	Define outputs functions.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp airfoil_recording_to_vtp({&airfoil});
+    BodyStatesRecordingToVtp airfoil_recording_to_vtp(airfoil);
+    airfoil_recording_to_vtp.addToWrite<Real>(airfoil, "SmoothingLengthRatio");
     MeshRecordingToPlt cell_linked_list_recording(sph_system, airfoil.getCellLinkedList());
     //----------------------------------------------------------------------
     //	Define body relation map.
@@ -82,8 +81,8 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	First output before the simulation.
     //----------------------------------------------------------------------
-    airfoil_recording_to_vtp.writeToFile(0);
-    cell_linked_list_recording.writeToFile(0);
+    airfoil_recording_to_vtp.writeToFile();
+    cell_linked_list_recording.writeToFile();
     //----------------------------------------------------------------------
     //	Particle relaxation time stepping start here.
     //----------------------------------------------------------------------

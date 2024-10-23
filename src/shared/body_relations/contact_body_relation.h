@@ -59,9 +59,9 @@ class ContactRelationCrossResolution : public BaseContactRelation
                 search_depth_ptrs_keeper_.createPtr<SearchDepthContact>(
                     sph_body_, target_cell_linked_list));
         }
-        resizeConfiguration();
     };
     virtual ~ContactRelationCrossResolution(){};
+    StdVec<CellLinkedList *> getContactCellLinkedList() { return target_cell_linked_lists_; }
 
   protected:
     StdVec<CellLinkedList *> target_cell_linked_lists_;
@@ -87,10 +87,11 @@ class ContactRelation : public ContactRelationCrossResolution
 };
 
 /**
- * @class SurfaceContactRelation
- * @brief The relation between a solid body and its contact solid bodies
+ * @class ShellSurfaceContactRelation
+ * @brief The relation between a solid body and its contact shell bodies
+ *        This contact relation can only be used for ShellContactFactor
  */
-class SurfaceContactRelation : public ContactRelationCrossResolution
+class ShellSurfaceContactRelation : public ContactRelationCrossResolution
 {
   protected:
     UniquePtrsKeeper<NeighborBuilderSurfaceContact> neighbor_builder_contact_ptrs_keeper_;
@@ -99,11 +100,11 @@ class SurfaceContactRelation : public ContactRelationCrossResolution
   public:
     BodySurfaceLayer *body_surface_layer_;
 
-    SurfaceContactRelation(SPHBody &sph_body, RealBodyVector contact_bodies);
-    SurfaceContactRelation(SelfSurfaceContactRelation &solid_body_relation_self_contact,
-                           RealBodyVector contact_bodies)
-        : SurfaceContactRelation(*solid_body_relation_self_contact.real_body_, contact_bodies){};
-    virtual ~SurfaceContactRelation(){};
+    ShellSurfaceContactRelation(SPHBody &sph_body, RealBodyVector contact_bodies);
+    ShellSurfaceContactRelation(SelfSurfaceContactRelation &solid_body_relation_self_contact,
+                                RealBodyVector contact_bodies)
+        : ShellSurfaceContactRelation(*solid_body_relation_self_contact.real_body_, contact_bodies){};
+    virtual ~ShellSurfaceContactRelation(){};
     virtual void updateConfiguration() override;
 
   protected:
@@ -151,6 +152,76 @@ class AdaptiveContactRelation : public BaseContactRelation
     virtual ~AdaptiveContactRelation(){};
 
     virtual void updateConfiguration() override;
+};
+
+/**
+ * @class ContactRelationFromShellToFluid
+ * @brief The relation between a fluid body and its contact shell bodies
+ */
+class ContactRelationFromShellToFluid : public ContactRelationCrossResolution
+{
+  private:
+    UniquePtrsKeeper<NeighborBuilderContactFromShellToFluid> neighbor_builder_contact_from_shell_ptrs_keeper_;
+
+  public:
+    ContactRelationFromShellToFluid(SPHBody &sph_body, RealBodyVector contact_bodies, const StdVec<bool> &normal_corrections);
+    ~ContactRelationFromShellToFluid() override = default;
+    void updateConfiguration() override;
+
+  private:
+    StdVec<NeighborBuilderContactFromShellToFluid *> get_shell_contact_neighbors_;
+};
+
+/**
+ * @class ContactRelationFromFluidToShell
+ * @brief The relation between a shell body and its contact contact fluid bodies
+ */
+class ContactRelationFromFluidToShell : public ContactRelationCrossResolution
+{
+  private:
+    UniquePtrsKeeper<NeighborBuilderContactFromFluidToShell> neighbor_builder_contact_to_shell_ptrs_keeper_;
+
+  public:
+    ContactRelationFromFluidToShell(SPHBody &sph_body, RealBodyVector contact_bodies, const StdVec<bool> &normal_corrections);
+    ~ContactRelationFromFluidToShell() override = default;
+    void updateConfiguration() override;
+
+  private:
+    StdVec<NeighborBuilderContactFromFluidToShell *> get_contact_neighbors_;
+};
+
+/**
+ * @class SurfaceContactRelation
+ * @brief The relation between a solid/shell body and its contact solid/shell bodies
+ *        NeighborBuilderContactFromSolidToSolid is used for solid contact bodies
+ *        NeighborBuilderContactFromShellToSolid is used for shell contact bodies
+ *        This class is used for RepulsionFactorSummation<Contact<>>
+ */
+class SurfaceContactRelation : public ContactRelationCrossResolution
+{
+  private:
+    UniquePtrsKeeper<NeighborBuilderSurfaceContactFromSolid> solid_neighbor_builder_contact_ptrs_keeper_;
+    UniquePtrsKeeper<NeighborBuilderSurfaceContactFromShell> shell_neighbor_builder_contact_ptrs_keeper_;
+    UniquePtrKeeper<BodySurfaceLayer> shape_surface_ptr_keeper_;
+
+  public:
+    SurfaceContactRelation(SPHBody &sph_body, RealBodyVector contact_bodies, StdVec<bool> normal_corrections = {});
+    SurfaceContactRelation(SelfSurfaceContactRelation &solid_body_relation_self_contact,
+                           RealBodyVector contact_bodies,
+                           StdVec<bool> normal_corrections = {})
+        : SurfaceContactRelation(*solid_body_relation_self_contact.real_body_,
+                                 std::move(contact_bodies),
+                                 std::move(normal_corrections)){};
+    ~SurfaceContactRelation() override = default;
+    void updateConfiguration() override;
+    BodySurfaceLayer *get_body_surface_layer() { return body_surface_layer_; }
+
+  private:
+    BodySurfaceLayer *body_surface_layer_;
+    IndexVector &body_part_particles_;
+    StdVec<NeighborBuilder *> get_contact_neighbors_;
+
+    void resetNeighborhoodCurrentSize() override;
 };
 } // namespace SPH
 #endif // CONTACT_BODY_RELATION_H

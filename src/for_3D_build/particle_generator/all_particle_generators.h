@@ -29,9 +29,11 @@
 #ifndef ALL_PARTICLE_GENERATORS_3D_H
 #define ALL_PARTICLE_GENERATORS_3D_H
 
+#include "base_particle_generator.hpp"
 #include "line_particle_generator.h"
 #include "particle_generator_lattice.h"
 #include "particle_generator_mesh.h"
 #include "particle_generator_network.h"
+#include "particle_generator_reserve.h"
 
 #endif // ALL_PARTICLE_GENERATORS_3D_H

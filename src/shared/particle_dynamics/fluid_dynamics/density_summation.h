@@ -51,16 +51,16 @@ class DensitySummation<Base, DataDelegationType>
     virtual ~DensitySummation(){};
 
   protected:
-    StdLargeVec<Real> &rho_, &mass_, &rho_sum_;
+    Real *rho_, *mass_, *rho_sum_, *Vol_;
     Real rho0_, inv_sigma0_, W0_;
 };
 
 template <>
-class DensitySummation<Inner<Base>> : public DensitySummation<Base, FluidDataInner>
+class DensitySummation<Inner<Base>> : public DensitySummation<Base, DataDelegateInner>
 {
   public:
     explicit DensitySummation(BaseInnerRelation &inner_relation)
-        : DensitySummation<Base, FluidDataInner>(inner_relation){};
+        : DensitySummation<Base, DataDelegateInner>(inner_relation){};
     virtual ~DensitySummation(){};
 };
 
@@ -88,11 +88,11 @@ class DensitySummation<Inner<Adaptive>> : public DensitySummation<Inner<Base>>
   protected:
     SPHAdaptation &sph_adaptation_;
     Kernel &kernel_;
-    StdLargeVec<Real> &h_ratio_;
+    Real *h_ratio_;
 };
 
 template <>
-class DensitySummation<Contact<Base>> : public DensitySummation<Base, FluidContactData>
+class DensitySummation<Contact<Base>> : public DensitySummation<Base, DataDelegateContact>
 {
   public:
     explicit DensitySummation(BaseContactRelation &contact_relation);
@@ -100,7 +100,7 @@ class DensitySummation<Contact<Base>> : public DensitySummation<Base, FluidConta
 
   protected:
     StdVec<Real> contact_inv_rho0_;
-    StdVec<StdLargeVec<Real> *> contact_mass_;
+    StdVec<Real *> contact_mass_;
     Real ContactSummation(size_t index_i);
 };
 
@@ -124,7 +124,7 @@ class DensitySummation<Contact<Adaptive>> : public DensitySummation<Contact<Base
 
   protected:
     SPHAdaptation &sph_adaptation_;
-    StdLargeVec<Real> &h_ratio_;
+    Real *h_ratio_;
 };
 
 template <typename... SummationType>
@@ -170,9 +170,11 @@ class DensitySummation<Inner<NearSurfaceType, SummationType...>>
 
   protected:
     NearSurfaceType near_surface_rho_;
-    StdLargeVec<int> &indicator_;
+    int *indicator_;
     bool isNearFreeSurface(size_t index_i);
 };
+using DensitySummationInnerNotNearSurface = DensitySummation<Inner<NotNearSurface>>;
+using DensitySummationInnerFreeStream = DensitySummation<Inner<FreeStream>>;
 
 template <class InnerInteractionType, class... ContactInteractionTypes>
 using BaseDensitySummationComplex = ComplexInteraction<DensitySummation<InnerInteractionType, ContactInteractionTypes...>>;

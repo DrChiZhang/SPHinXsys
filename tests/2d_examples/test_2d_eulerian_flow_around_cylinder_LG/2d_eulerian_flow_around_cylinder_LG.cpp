@@ -93,20 +93,19 @@ int main(int ac, char *av[])
     FluidBody water_block(sph_system, makeShared<WaterBlock>("WaterBlock"));
     water_block.sph_adaptation_->resetKernel<KernelTabulated<KernelLaguerreGauss>>(20);
     water_block.defineComponentLevelSetShape("OuterBoundary");
-    water_block.defineParticlesAndMaterial<BaseParticles, WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
+    water_block.defineMaterial<WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
     (!sph_system.RunParticleRelaxation() && sph_system.ReloadParticles())
-        ? water_block.generateParticles<ParticleGeneratorReload>(water_block.getName())
-        : water_block.generateParticles<ParticleGeneratorLattice>();
-    water_block.addBodyStateForRecording<int>("Indicator");
+        ? water_block.generateParticles<BaseParticles, Reload>(water_block.getName())
+        : water_block.generateParticles<BaseParticles, Lattice>();
 
     SolidBody cylinder(sph_system, makeShared<Cylinder>("Cylinder"));
     cylinder.defineAdaptationRatios(1.3, 2.0);
     cylinder.sph_adaptation_->resetKernel<KernelTabulated<KernelLaguerreGauss>>(20);
     cylinder.defineBodyLevelSetShape();
-    cylinder.defineParticlesAndMaterial<SolidParticles, Solid>();
+    cylinder.defineMaterial<Solid>();
     (!sph_system.RunParticleRelaxation() && sph_system.ReloadParticles())
-        ? cylinder.generateParticles<ParticleGeneratorReload>(cylinder.getName())
-        : cylinder.generateParticles<ParticleGeneratorLattice>();
+        ? cylinder.generateParticles<BaseParticles, Reload>(cylinder.getName())
+        : cylinder.generateParticles<BaseParticles, Lattice>();
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -114,6 +113,7 @@ int main(int ac, char *av[])
     //	Note that the same relation should be defined only once.
     //----------------------------------------------------------------------
     InnerRelation water_block_inner(water_block);
+    InnerRelation cylinder_inner(cylinder);
     ContactRelation water_block_contact(water_block, {&cylinder});
     ContactRelation cylinder_contact(cylinder, {&water_block});
     //----------------------------------------------------------------------
@@ -127,18 +127,17 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     if (sph_system.RunParticleRelaxation())
     {
-        InnerRelation cylinder_inner(cylinder);
         //----------------------------------------------------------------------
         //	Methods used for particle relaxation.
         //----------------------------------------------------------------------
         using namespace relax_dynamics;
         SimpleDynamics<RandomizeParticlePosition> random_inserted_body_particles(cylinder);
         SimpleDynamics<RandomizeParticlePosition> random_water_body_particles(water_block);
-        BodyStatesRecordingToVtp write_real_body_states(sph_system.real_bodies_);
-        ReloadParticleIO write_real_body_particle_reload_files(sph_system.real_bodies_);
+        BodyStatesRecordingToVtp write_real_body_states(sph_system);
+        ReloadParticleIO write_real_body_particle_reload_files({&cylinder, &water_block});
         RelaxationStepLevelSetCorrectionInner relaxation_step_inner(cylinder_inner);
         RelaxationStepLevelSetCorrectionComplex relaxation_step_complex(
-            ConstructorArgs(water_block_inner, "OuterBoundary"), water_block_contact);
+            ConstructorArgs(water_block_inner, std::string("OuterBoundary")), water_block_contact);
         //----------------------------------------------------------------------
         //	Particle relaxation starts here.
         //----------------------------------------------------------------------
@@ -170,26 +169,30 @@ int main(int ac, char *av[])
     //	Define the main numerical methods used in the simulation.
     //	Note that there may be data dependence on the constructors of these methods.
     //----------------------------------------------------------------------
-    InteractionWithUpdate<fluid_dynamics::EulerianIntegration1stHalfWithWallRiemann> pressure_relaxation(water_block_inner, water_block_contact);
-    InteractionWithUpdate<fluid_dynamics::EulerianIntegration2ndHalfWithWallRiemann> density_relaxation(water_block_inner, water_block_contact);
-    InteractionWithUpdate<KernelCorrectionMatrixComplex> kernel_correction_matrix(water_block_inner, water_block_contact);
-    InteractionDynamics<KernelGradientCorrectionComplex> kernel_gradient_update(water_block_inner, water_block_contact);
-    SimpleDynamics<NormalDirectionFromBodyShape> cylinder_normal_direction(cylinder);
-    InteractionWithUpdate<fluid_dynamics::ViscousForceWithWall> viscous_force(water_block_inner, water_block_contact);
-    SimpleDynamics<NormalDirectionFromBodyShape> water_block_normal_direction(water_block);
-    ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> get_fluid_time_step_size(water_block, 0.5);
-    InteractionWithUpdate<FarFieldBoundary> variable_reset_in_boundary_condition(water_block_inner);
     InteractionWithUpdate<FreeSurfaceIndicationComplex> surface_indicator(water_block_inner, water_block_contact);
     InteractionDynamics<SmearedSurfaceIndication> smeared_surface(water_block_inner);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixComplex> cylinder_kernel_correction_matrix(cylinder_inner, cylinder_contact);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixComplex> water_block_kernel_correction_matrix(water_block_inner, water_block_contact);
+    InteractionDynamics<KernelGradientCorrectionComplex> kernel_gradient_update(water_block_inner, water_block_contact);
+    SimpleDynamics<NormalDirectionFromBodyShape> cylinder_normal_direction(cylinder);
+
+    InteractionWithUpdate<fluid_dynamics::EulerianIntegration1stHalfWithWallRiemann> pressure_relaxation(water_block_inner, water_block_contact);
+    InteractionWithUpdate<fluid_dynamics::EulerianIntegration2ndHalfWithWallRiemann> density_relaxation(water_block_inner, water_block_contact);
+
+    InteractionWithUpdate<fluid_dynamics::ViscousForceWithWall> viscous_force(water_block_inner, water_block_contact);
+    SimpleDynamics<NormalDirectionFromBodyShape> water_block_normal_direction(water_block);
+    ReduceDynamics<fluid_dynamics::AcousticTimeStep> get_fluid_time_step_size(water_block, 0.5);
+    InteractionWithUpdate<FarFieldBoundary> variable_reset_in_boundary_condition(water_block_inner);
     //----------------------------------------------------------------------
     //	Compute the force exerted on solid body due to fluid pressure and viscosity
     //----------------------------------------------------------------------
     InteractionWithUpdate<solid_dynamics::ViscousForceFromFluid> viscous_force_from_fluid(cylinder_contact);
-    InteractionWithUpdate<solid_dynamics::PressureForceFromFluid> pressure_force_from_fluid(cylinder_contact);
+    InteractionWithUpdate<solid_dynamics::PressureForceFromFluid<decltype(density_relaxation)>> pressure_force_from_fluid(cylinder_contact);
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations and observations of the simulation.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp write_real_body_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_real_body_states(sph_system);
+    write_real_body_states.addToWrite<int>(water_block, "Indicator");
     RegressionTestDynamicTimeWarping<ReducedQuantityRecording<QuantitySummation<Vecd>>>
         write_total_viscous_force_from_fluid(cylinder, "ViscousForceFromFluid");
     ReducedQuantityRecording<QuantitySummation<Vecd>>
@@ -206,11 +209,13 @@ int main(int ac, char *av[])
     smeared_surface.exec();
     water_block_normal_direction.exec();
     variable_reset_in_boundary_condition.exec();
-    kernel_correction_matrix.exec();
+    cylinder_kernel_correction_matrix.exec();
+    water_block_kernel_correction_matrix.exec();
     kernel_gradient_update.exec();
     //----------------------------------------------------------------------
     //	Setup for time-stepping control
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     size_t number_of_iterations = 0;
     int screen_output_interval = 1000;
     Real end_time = 80.0;
@@ -227,7 +232,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_interval)
@@ -238,13 +243,13 @@ int main(int ac, char *av[])
             density_relaxation.exec(dt);
 
             integration_time += dt;
-            GlobalStaticVariables::physical_time_ += dt;
+            physical_time += dt;
             variable_reset_in_boundary_condition.exec();
 
             if (number_of_iterations % screen_output_interval == 0)
             {
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations << "	Time = "
-                          << GlobalStaticVariables::physical_time_
+                          << physical_time
                           << "	dt = " << dt << "\n";
             }
             number_of_iterations++;

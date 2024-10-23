@@ -76,12 +76,11 @@ int main(int ac, char *av[])
     SolidBody cantilever_body(sph_system, makeShared<Cantilever>("CantileverBody"));
     cantilever_body.defineAdaptationRatios(1.3, 1.0);
     cantilever_body.sph_adaptation_->resetKernel<KernelTabulated<KernelLaguerreGauss>>(20);
-    cantilever_body.defineParticlesAndMaterial<
-        ElasticSolidParticles, Muscle>(rho0_s, bulk_modulus, fiber_direction, sheet_direction, a0, b0);
-    cantilever_body.generateParticles<ParticleGeneratorLattice>();
+    cantilever_body.defineMaterial<Muscle>(rho0_s, bulk_modulus, fiber_direction, sheet_direction, a0, b0);
+    cantilever_body.generateParticles<BaseParticles, Lattice>();
     /** Define Observer. */
     ObserverBody cantilever_observer(sph_system, "CantileverObserver");
-    cantilever_observer.generateParticles<ParticleGeneratorObserver>(observation_location);
+    cantilever_observer.generateParticles<ObserverParticles>(observation_location);
 
     /** topology */
     InnerRelation cantilever_body_inner(cantilever_body);
@@ -90,30 +89,26 @@ int main(int ac, char *av[])
     /**
      * This section define all numerical methods will be used in this case.
      */
-    SimpleDynamics<CantileverInitialCondition> initialization(cantilever_body);
-    /** Corrected configuration. */
-    InteractionWithUpdate<KernelCorrectionMatrixInner>
-        corrected_configuration(cantilever_body_inner);
-    /** Time step size calculation. */
-    ReduceDynamics<solid_dynamics::AcousticTimeStepSize>
-        computing_time_step_size(cantilever_body, 0.3);
-    /** active and passive stress relaxation. */
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> corrected_configuration(cantilever_body_inner);
+
     Dynamics1Level<solid_dynamics::Integration1stHalfPK2> stress_relaxation_first_half(cantilever_body_inner);
     Dynamics1Level<solid_dynamics::Integration2ndHalf> stress_relaxation_second_half(cantilever_body_inner);
-    /** Constrain the holder. */
-    BodyRegionByParticle holder(cantilever_body,
-                                makeShared<TransformShape<GeometricShapeBox>>(Transform(translation_holder), halfsize_holder, "Holder"));
-    SimpleDynamics<solid_dynamics::FixBodyPartConstraint> constraint_holder(holder);
+
+    ReduceDynamics<solid_dynamics::AcousticTimeStep> computing_time_step_size(cantilever_body, 0.3);
+    SimpleDynamics<CantileverInitialCondition> initialization(cantilever_body);
+
+    TransformShape<GeometricShapeBox> holder_shape(Transform(translation_holder), halfsize_holder, "Holder");
+    BodyRegionByParticle holder(cantilever_body, holder_shape);
+    SimpleDynamics<FixBodyPartConstraint> constraint_holder(holder);
     /** Output */
     IOEnvironment io_environment(sph_system);
-    BodyStatesRecordingToVtp write_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_states(sph_system);
     RegressionTestDynamicTimeWarping<ObservedQuantityRecording<Vecd>>
         write_displacement("Position", cantilever_observer_contact);
     /**
      * From here the time stepping begins.
      * Set the starting time.
      */
-    GlobalStaticVariables::physical_time_ = 0.0;
     sph_system.initializeSystemCellLinkedLists();
     sph_system.initializeSystemConfigurations();
     /** apply initial condition */
@@ -122,6 +117,7 @@ int main(int ac, char *av[])
     write_states.writeToFile(0);
     write_displacement.writeToFile(0);
     /** Setup physical parameters. */
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     int ite = 0;
     Real end_time = 3.0;
     Real output_period = end_time / 100.0;
@@ -132,7 +128,7 @@ int main(int ac, char *av[])
     /**
      * Main loop
      */
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < output_period)
@@ -140,7 +136,7 @@ int main(int ac, char *av[])
             if (ite % 100 == 0)
             {
                 std::cout << "N=" << ite << " Time: "
-                          << GlobalStaticVariables::physical_time_ << "	dt: "
+                          << physical_time << "	dt: "
                           << dt << "\n";
             }
             stress_relaxation_first_half.exec(dt);
@@ -150,7 +146,7 @@ int main(int ac, char *av[])
             ite++;
             dt = computing_time_step_size.exec();
             integration_time += dt;
-            GlobalStaticVariables::physical_time_ += dt;
+            physical_time += dt;
         }
         write_displacement.writeToFile(ite);
         TickCount t2 = TickCount::now();
@@ -164,8 +160,14 @@ int main(int ac, char *av[])
     tt = t4 - t1 - interval;
     std::cout << "Total wall time for computation: " << tt.seconds() << " seconds." << std::endl;
 
-    write_displacement.testResult();
-
+    if (sph_system.GenerateRegressionData())
+    {
+        write_displacement.generateDataBase(1.0e-2);
+    }
+    else
+    {
+        write_displacement.testResult();
+    }
 
     return 0;
 }

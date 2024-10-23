@@ -71,16 +71,6 @@ class InitialCondition
     }
 };
 
-// define an observer body
-class ColumnObserverParticleGenerator : public ParticleGeneratorObserver
-{
-  public:
-    explicit ColumnObserverParticleGenerator(SPHBody &sph_body) : ParticleGeneratorObserver(sph_body)
-    {
-        positions_.push_back(Vecd(0.0, 0.0, PW));
-    }
-};
-
 /**
  * @class DynamicContactForceWithWall
  * @brief Computing the contact force with a rigid wall.
@@ -88,21 +78,25 @@ class ColumnObserverParticleGenerator : public ParticleGeneratorObserver
  *  updated before computing the contact force.
  */
 class DynamicContactForceWithWall : public LocalDynamics,
-                                    public DataDelegateContact<SolidParticles, SolidParticles>
+                                    public DataDelegateContact
 {
   public:
     explicit DynamicContactForceWithWall(SurfaceContactRelation &solid_body_contact_relation, Real penalty_strength = 1.0)
         : LocalDynamics(solid_body_contact_relation.getSPHBody()),
-          DataDelegateContact<SolidParticles, SolidParticles>(solid_body_contact_relation),
-          solid_(particles_->solid_), Vol_(particles_->Vol_), vel_(particles_->vel_),
-          force_prior_(particles_->force_prior_), penalty_strength_(penalty_strength)
+          DataDelegateContact(solid_body_contact_relation),
+          solid_(DynamicCast<Solid>(this, sph_body_.getBaseMaterial())),
+          Vol_(particles_->getVariableDataByName<Real>("VolumetricMeasure")),
+          vel_(particles_->getVariableDataByName<Vecd>("Velocity")),
+          force_prior_(particles_->getVariableDataByName<Vecd>("ForcePrior")),
+          penalty_strength_(penalty_strength)
     {
-        impedance_ = solid_.ReferenceDensity() * sqrt(solid_.ContactStiffness());
-        reference_pressure_ = solid_.ReferenceDensity() * solid_.ContactStiffness();
+        impedance_ = sqrt(solid_.ReferenceDensity() * solid_.ContactStiffness());
+        reference_pressure_ = solid_.ContactStiffness();
         for (size_t k = 0; k != contact_particles_.size(); ++k)
         {
-            contact_vel_.push_back(&(contact_particles_[k]->vel_));
-            contact_n_.push_back(&(contact_particles_[k]->n_));
+            contact_Vol_.push_back(contact_particles_[k]->getVariableDataByName<Real>("VolumetricMeasure"));
+            contact_vel_.push_back(contact_particles_[k]->registerStateVariable<Vecd>("Velocity"));
+            contact_n_.push_back(contact_particles_[k]->template getVariableDataByName<Vecd>("NormalDirection"));
         }
     };
     virtual ~DynamicContactForceWithWall(){};
@@ -116,9 +110,9 @@ class DynamicContactForceWithWall : public LocalDynamics,
                 1.0 / (sph_body_.sph_adaptation_->ReferenceSpacing() * particle_spacing_j1);
             particle_spacing_ratio2 *= 0.1 * particle_spacing_ratio2;
 
-            StdLargeVec<Vecd> &n_k = *(contact_n_[k]);
-            StdLargeVec<Vecd> &vel_n_k = *(contact_vel_[k]);
-
+            Vecd *n_k = contact_n_[k];
+            Vecd *vel_n_k = contact_vel_[k];
+            Real *Vol_k = contact_Vol_[k];
             Neighborhood &contact_neighborhood = (*contact_configuration_[k])[index_i];
             for (size_t n = 0; n != contact_neighborhood.current_size_; ++n)
             {
@@ -134,7 +128,7 @@ class DynamicContactForceWithWall : public LocalDynamics,
 
                 // force due to pressure
                 force -= 2.0 * (impedance_p + penalty_p) * e_ij.dot(n_k_j) *
-                         n_k_j * contact_neighborhood.dW_ijV_j_[n];
+                         n_k_j * contact_neighborhood.dW_ij_[n] * Vol_k[index_j];
             }
         }
 
@@ -143,9 +137,10 @@ class DynamicContactForceWithWall : public LocalDynamics,
 
   protected:
     Solid &solid_;
-    StdLargeVec<Real> &Vol_;
-    StdLargeVec<Vecd> &vel_, &force_prior_; // note that prior force directly used here
-    StdVec<StdLargeVec<Vecd> *> contact_vel_, contact_n_;
+    Real *Vol_;
+    Vecd *vel_, *force_prior_; // note that prior force directly used here
+    StdVec<Real *> contact_Vol_;
+    StdVec<Vecd *> contact_vel_, contact_n_;
     Real penalty_strength_;
     Real impedance_, reference_pressure_;
 };

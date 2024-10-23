@@ -18,19 +18,19 @@ int main(int ac, char *av[])
     //	Creating body, materials and particles.
     //----------------------------------------------------------------------
     FluidBody water_block(sph_system, makeShared<WaterBlock>("WaterBody"));
-    water_block.defineParticlesAndMaterial<BaseParticles, WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
-    water_block.generateParticles<ParticleGeneratorLattice>();
+    water_block.defineMaterial<WeaklyCompressibleFluid>(rho0_f, c_f, mu_f);
+    water_block.generateParticles<BaseParticles, Lattice>();
 
-    SolidBody wall_boundary(sph_system, makeShared<WallBoundary>("Wall"));
-    wall_boundary.defineParticlesAndMaterial<SolidParticles, Solid>();
-    wall_boundary.generateParticles<ParticleGeneratorLattice>();
+    SolidBody wall_boundary(sph_system, makeShared<WallBoundary>("WallBoundary"));
+    wall_boundary.defineMaterial<Solid>();
+    wall_boundary.generateParticles<BaseParticles, Lattice>();
 
     SolidBody flap(sph_system, makeShared<Flap>("Flap"));
-    flap.defineParticlesAndMaterial<SolidParticles, Solid>(rho0_s);
-    flap.generateParticles<ParticleGeneratorLattice>();
+    flap.defineMaterial<Solid>(rho0_s);
+    flap.generateParticles<BaseParticles, Lattice>();
 
-    ObserverBody observer(sph_system, "FlapObserver");
-    observer.generateParticles<FlapObserverParticleGenerator>();
+    ObserverBody observer(sph_system, "Observer");
+    observer.generateParticles<ObserverParticles>(creatObserverPositions());
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -51,36 +51,43 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     ComplexRelation water_block_complex(water_block_inner, water_block_contact);
     //----------------------------------------------------------------------
-    //	Define all numerical methods which are used in this case.
+    // Define the numerical methods used in the simulation.
+    // Note that there may be data dependence on the sequence of constructions.
+    // Generally, the geometric models or simple objects without data dependencies,
+    // such as gravity, should be initiated first.
+    // Then the major physical particle dynamics model should be introduced.
+    // Finally, the auxillary models such as time step estimator, initial condition,
+    // boundary condition and other constraints should be defined.
+    // For typical fluid-structure interaction, we first define structure dynamics,
+    // Then fluid dynamics and the corresponding coupling dynamics.
+    // The coupling with multi-body dynamics will be introduced at last.
     //----------------------------------------------------------------------
+    Gravity gravity(Vecd(0.0, -gravity_g));
+    SimpleDynamics<GravityForce<Gravity>> constant_gravity(water_block, gravity);
     SimpleDynamics<OffsetInitialPosition> flap_offset_position(flap, offset);
     SimpleDynamics<NormalDirectionFromBodyShape> wall_boundary_normal_direction(wall_boundary);
     SimpleDynamics<NormalDirectionFromBodyShape> flap_normal_direction(flap);
 
-    /** corrected strong configuration. */
-    InteractionWithUpdate<KernelCorrectionMatrixInner> flap_corrected_configuration(flap_inner);
-    Gravity gravity(Vecd(0.0, -gravity_g));
-    SimpleDynamics<GravityForce> constant_gravity(water_block, gravity);
-    /** Evaluation of density by summation approach. */
-    InteractionWithUpdate<fluid_dynamics::DensitySummationComplexFreeSurface> update_density_by_summation(water_block_inner, water_block_contact);
-    /** time step size without considering sound wave speed. */
-    ReduceDynamics<fluid_dynamics::AdvectionTimeStepSize> get_fluid_advection_time_step_size(water_block, U_f);
-    /** time step size with considering sound wave speed. */
-    ReduceDynamics<fluid_dynamics::AcousticTimeStepSize> get_fluid_time_step_size(water_block);
-    /** pressure relaxation using Verlet time stepping. */
     Dynamics1Level<fluid_dynamics::Integration1stHalfWithWallRiemann> pressure_relaxation(water_block_inner, water_block_contact);
     Dynamics1Level<fluid_dynamics::Integration2ndHalfWithWallRiemann> density_relaxation(water_block_inner, water_block_contact);
-    /** Computing viscous acceleration. */
+    InteractionWithUpdate<fluid_dynamics::DensitySummationComplexFreeSurface> update_density_by_summation(water_block_inner, water_block_contact);
     InteractionWithUpdate<fluid_dynamics::ViscousForceWithWall> viscous_force(water_block_inner, water_block_contact);
-    /** Inflow boundary condition. */
+
+    ReduceDynamics<fluid_dynamics::AdvectionViscousTimeStep> get_fluid_advection_time_step_size(water_block, U_f);
+    ReduceDynamics<fluid_dynamics::AcousticTimeStep> get_fluid_time_step_size(water_block);
     BodyRegionByCell damping_buffer(water_block, makeShared<MultiPolygonShape>(createDampingBufferShape()));
     SimpleDynamics<fluid_dynamics::DampingBoundaryCondition> damping_wave(damping_buffer);
-    /** Fluid force on flap. */
-    InteractionWithUpdate<solid_dynamics::ViscousForceFromFluid> viscous_force_from_fluid(flap_contact);
-    InteractionWithUpdate<solid_dynamics::PressureForceFromFluidRiemann> pressure_force_from_fluid(flap_contact);
-    /** constrain region of the part of wall boundary. */
     BodyRegionByParticle wave_maker(wall_boundary, makeShared<MultiPolygonShape>(createWaveMakerShape()));
     SimpleDynamics<WaveMaking> wave_making(wave_maker);
+
+    InteractionWithUpdate<solid_dynamics::ViscousForceFromFluid> viscous_force_from_fluid(flap_contact);
+    InteractionWithUpdate<solid_dynamics::PressureForceFromFluid<decltype(density_relaxation)>> pressure_force_from_fluid(flap_contact);
+
+    //----------------------------------------------------------------------
+    //	Define the configuration related particles dynamics.
+    //----------------------------------------------------------------------
+    ParticleSorting particle_sorting(water_block);
+
     //----------------------------------------------------------------------
     //	Define the multi-body system
     //----------------------------------------------------------------------
@@ -164,7 +171,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations and observations of the simulation.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp write_real_body_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_real_body_states(sph_system);
     RegressionTestDynamicTimeWarping<ReducedQuantityRecording<QuantitySummation<Vecd>>>
         write_total_viscous_force_from_fluid(flap, "ViscousForceFromFluid");
     WriteSimBodyPinData write_flap_pin_data(sph_system, integ, pin_spot);
@@ -197,7 +204,6 @@ int main(int ac, char *av[])
     sph_system.initializeSystemConfigurations();
     wall_boundary_normal_direction.exec();
     flap_normal_direction.exec();
-    flap_corrected_configuration.exec();
     constant_gravity.exec();
     //----------------------------------------------------------------------
     //	First output before the main loop.
@@ -212,7 +218,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Basic control parameters for time stepping.
     //----------------------------------------------------------------------
-    GlobalStaticVariables::physical_time_ = 0.0;
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     int number_of_iterations = 0;
     int screen_output_interval = 1000;
     Real end_time = total_physical_time;
@@ -226,7 +232,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop of time stepping starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integral_time = 0.0;
         while (integral_time < output_interval)
@@ -261,19 +267,23 @@ int main(int ac, char *av[])
                 integral_time += dt;
                 total_time += dt;
                 if (total_time >= relax_time)
-                    GlobalStaticVariables::physical_time_ += dt;
+                    physical_time += dt;
             }
 
             if (number_of_iterations % screen_output_interval == 0)
             {
                 std::cout << std::fixed << std::setprecision(9) << "N=" << number_of_iterations
                           << "	Total Time = " << total_time
-                          << "	Physical Time = " << GlobalStaticVariables::physical_time_
+                          << "	Physical Time = " << physical_time
                           << "	Dt = " << Dt << "	dt = " << dt << "\n";
             }
             number_of_iterations++;
             damping_wave.exec(Dt);
-            water_block.updateCellLinkedListWithParticleSort(100);
+            if (number_of_iterations % 100 == 0 && number_of_iterations != 1)
+            {
+                particle_sorting.exec();
+            }
+            water_block.updateCellLinkedList();
             wall_boundary.updateCellLinkedList();
             flap.updateCellLinkedList();
             water_block_complex.updateConfiguration();
@@ -282,7 +292,7 @@ int main(int ac, char *av[])
             if (total_time >= relax_time)
             {
                 write_total_viscous_force_from_fluid.writeToFile(number_of_iterations);
-                write_flap_pin_data.writeToFile(GlobalStaticVariables::physical_time_);
+                write_flap_pin_data.writeToFile(physical_time);
                 wave_probe_4.writeToFile(number_of_iterations);
                 wave_probe_5.writeToFile(number_of_iterations);
                 wave_probe_12.writeToFile(number_of_iterations);

@@ -95,93 +95,57 @@ MultiPolygon createOtherSideBoundary()
     return multi_polygon;
 }
 //----------------------------------------------------------------------
-//	Cases-dependent diffusion material
+// Define extra classes which are used in the main program.
+// These classes are defined under the namespace of SPH.
 //----------------------------------------------------------------------
-class DiffusionMaterial : public DiffusionReaction<Solid>
+namespace SPH
 {
-  public:
-    DiffusionMaterial() : DiffusionReaction<Solid>({"Phi"}, SharedPtr<NoReaction>())
-    {
-        initializeAnDiffusion<DirectionalDiffusion>("Phi", "Phi", diffusion_coeff, bias_coeff, bias_direction);
-    };
-};
-//----------------------------------------------------------------------
-//	Set left side boundary condition.
-//----------------------------------------------------------------------
-using DiffusionParticles = DiffusionReactionParticles<SolidParticles, DiffusionMaterial>;
-class ConstantTemperatureConstraint
-    : public DiffusionReactionSpeciesConstraint<BodyPartByParticle, DiffusionParticles>
-{
-  public:
-    ConstantTemperatureConstraint(BodyPartByParticle &body_part, const std::string &species_name, Real constrained_value)
-        : DiffusionReactionSpeciesConstraint<BodyPartByParticle, DiffusionParticles>(body_part, species_name),
-          constrained_value_(constrained_value){};
-
-    void update(size_t index_i, Real dt = 0.0)
-    {
-        species_[index_i] = constrained_value_;
-    };
-
-  protected:
-    Real constrained_value_;
-};
 //----------------------------------------------------------------------
 //	Case-dependent initial condition.
 //----------------------------------------------------------------------
-class DiffusionInitialCondition
-    : public DiffusionReactionInitialCondition<DiffusionParticles>
+class DiffusionInitialCondition : public LocalDynamics
 {
-  protected:
-    size_t phi_;
-
   public:
     explicit DiffusionInitialCondition(SPHBody &sph_body)
-        : DiffusionReactionInitialCondition<DiffusionParticles>(sph_body)
-    {
-        phi_ = particles_->diffusion_reaction_material_.AllSpeciesIndexMap()["Phi"];
-    };
+        : LocalDynamics(sph_body),
+          pos_(particles_->getVariableDataByName<Vecd>("Position")),
+          phi_(particles_->registerStateVariable<Real>("Phi")){};
 
     void update(size_t index_i, Real dt)
     {
         if (pos_[index_i][0] >= 0 && pos_[index_i][0] <= L && pos_[index_i][1] >= 0 && pos_[index_i][1] <= H)
         {
-            all_species_[phi_][index_i] = initial_temperature;
+            phi_[index_i] = initial_temperature;
         }
     };
+
+  protected:
+    Vecd *pos_;
+    Real *phi_;
 };
 //----------------------------------------------------------------------
 //	Specify diffusion relaxation method.
 //----------------------------------------------------------------------
-class DiffusionBodyRelaxation
-    : public DiffusionRelaxationRK2<
-          DiffusionRelaxation<Inner<DiffusionParticles, CorrectedKernelGradientInner>>>
-{
-  public:
-    explicit DiffusionBodyRelaxation(BaseInnerRelation &inner_relation)
-        : DiffusionRelaxationRK2(inner_relation){};
-    virtual ~DiffusionBodyRelaxation(){};
-};
-//----------------------------------------------------------------------
-//	an observer body to measure temperature at given positions.
-//----------------------------------------------------------------------
-class TemperatureObserverParticleGenerator : public ParticleGeneratorObserver
-{
-  public:
-    explicit TemperatureObserverParticleGenerator(SPHBody &sph_body)
-        : ParticleGeneratorObserver(sph_body)
-    {
-        /** A line of measuring points at the middle line. */
-        size_t number_of_observation_points = 11;
-        Real range_of_measure = L - BW;
-        Real start_of_measure = BW;
+using DiffusionBodyRelaxation =
+    DiffusionRelaxationRK2<DiffusionRelaxation<Inner<CorrectedKernelGradientInner>, BaseDiffusion>>;
 
-        for (size_t i = 0; i < number_of_observation_points; ++i)
-        {
-            Vec2d point_coordinate(0.5 * L, start_of_measure + range_of_measure * (Real)i / (Real)(number_of_observation_points - 1));
-            positions_.push_back(point_coordinate);
-        }
+StdVec<Vecd> createObservationPoints()
+{
+    /** A line of measuring points at the middle line. */
+    size_t number_of_observation_points = 11;
+    Real range_of_measure = L - BW;
+    Real start_of_measure = BW;
+
+    StdVec<Vecd> observation_points;
+    for (size_t i = 0; i < number_of_observation_points; ++i)
+    {
+        Vec2d point_coordinate(0.5 * L, start_of_measure + range_of_measure * (Real)i / (Real)(number_of_observation_points - 1));
+        observation_points.push_back(point_coordinate);
     }
+    return observation_points;
 };
+
+} // namespace SPH
 //----------------------------------------------------------------------
 //	Main program starts here.
 //----------------------------------------------------------------------
@@ -196,13 +160,14 @@ int main(int ac, char *av[])
     //	Create body, materials and particles.
     //----------------------------------------------------------------------
     SolidBody diffusion_body(sph_system, makeShared<MultiPolygonShape>(createDiffusionDomain(), "DiffusionBody"));
-    diffusion_body.defineParticlesAndMaterial<DiffusionParticles, DiffusionMaterial>();
-    diffusion_body.generateParticles<ParticleGeneratorLattice>();
+    DirectionalDiffusion *diffusion =
+        diffusion_body.defineMaterial<DirectionalDiffusion>("Phi", diffusion_coeff, bias_coeff, bias_direction);
+    diffusion_body.generateParticles<BaseParticles, Lattice>();
     //----------------------------------------------------------------------
     //	Observer body
     //----------------------------------------------------------------------
     ObserverBody temperature_observer(sph_system, "TemperatureObserver");
-    temperature_observer.generateParticles<TemperatureObserverParticleGenerator>();
+    temperature_observer.generateParticles<ObserverParticles>(createObservationPoints());
     //----------------------------------------------------------------------
     //	Define body relation map.
     //	The contact map gives the topological connections between the bodies.
@@ -215,23 +180,25 @@ int main(int ac, char *av[])
     //	Define the main numerical methods used in the simulation.
     //	Note that there may be data dependence on the constructors of these methods.
     //----------------------------------------------------------------------
-    DiffusionBodyRelaxation diffusion_relaxation(diffusion_body_inner_relation);
     SimpleDynamics<DiffusionInitialCondition> setup_diffusion_initial_condition(diffusion_body);
-    InteractionWithUpdate<KernelCorrectionMatrixInner> correct_configuration(diffusion_body_inner_relation);
-    GetDiffusionTimeStepSize<DiffusionParticles> get_time_step_size(diffusion_body);
+    InteractionWithUpdate<LinearGradientCorrectionMatrixInner> correct_configuration(diffusion_body_inner_relation);
+
+    DiffusionBodyRelaxation diffusion_relaxation(diffusion_body_inner_relation, diffusion);
+
+    GetDiffusionTimeStepSize get_time_step_size(diffusion_body, *diffusion);
     BodyRegionByParticle left_boundary(diffusion_body, makeShared<MultiPolygonShape>(createLeftSideBoundary()));
-    SimpleDynamics<ConstantTemperatureConstraint> left_boundary_condition(left_boundary, "Phi", high_temperature);
+    SimpleDynamics<ConstantConstraint<BodyRegionByParticle, Real>> left_boundary_condition(left_boundary, "Phi", high_temperature);
     BodyRegionByParticle other_boundary(diffusion_body, makeShared<MultiPolygonShape>(createOtherSideBoundary()));
-    SimpleDynamics<ConstantTemperatureConstraint> other_boundary_condition(other_boundary, "Phi", low_temperature);
+    SimpleDynamics<ConstantConstraint<BodyRegionByParticle, Real>> other_boundary_condition(other_boundary, "Phi", low_temperature);
     //----------------------------------------------------------------------
     //	Define the methods for I/O operations, observations of the simulation.
     //	Regression tests are also defined here.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp write_states(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_states(sph_system);
     RegressionTestEnsembleAverage<ObservedQuantityRecording<Real>>
         write_solid_temperature("Phi", temperature_observer_contact);
     BodyRegionByParticle inner_domain(diffusion_body, makeShared<MultiPolygonShape>(createInnerDomain(), "InnerDomain"));
-    RegressionTestDynamicTimeWarping<ReducedQuantityRecording<Average<SpeciesSummation<BodyPartByParticle, DiffusionParticles>>>>
+    RegressionTestDynamicTimeWarping<ReducedQuantityRecording<Average<QuantitySummation<Real, BodyPartByParticle>>>>
         write_solid_average_temperature_part(inner_domain, "Phi");
     //----------------------------------------------------------------------
     //	Prepare the simulation with cell linked list, configuration
@@ -246,6 +213,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Setup for time-stepping control
     //----------------------------------------------------------------------
+    Real &physical_time = *sph_system.getSystemVariableDataByName<Real>("PhysicalTime");
     int ite = 0;
     Real T0 = 20.0;
     Real end_time = T0;
@@ -265,7 +233,7 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     //	Main loop starts here.
     //----------------------------------------------------------------------
-    while (GlobalStaticVariables::physical_time_ < end_time)
+    while (physical_time < end_time)
     {
         Real integration_time = 0.0;
         while (integration_time < Output_Time)
@@ -276,7 +244,7 @@ int main(int ac, char *av[])
                 if (ite % 1 == 0)
                 {
                     std::cout << "N=" << ite << " Time: "
-                              << GlobalStaticVariables::physical_time_ << "	dt: "
+                              << physical_time << "	dt: "
                               << dt << "\n";
                 }
 
@@ -287,7 +255,7 @@ int main(int ac, char *av[])
                 dt = get_time_step_size.exec();
                 relaxation_time += dt;
                 integration_time += dt;
-                GlobalStaticVariables::physical_time_ += dt;
+                physical_time += dt;
 
                 if (ite % 100 == 0)
                 {

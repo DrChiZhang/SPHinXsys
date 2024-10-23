@@ -26,7 +26,8 @@
  * @author	Chi Zhang, Shuoguo Zhang and Xiangyu Hu
  */
 
-#pragma once
+#ifndef IO_SIMBODY_H
+#define IO_SIMBODY_H
 
 #include "io_base.h"
 
@@ -43,11 +44,13 @@ class SimBodyStatesIO
     IOEnvironment &io_environment_;
     SimTK::RungeKuttaMersonIntegrator &integ_;
     MobilizedBodyType &mobody_;
+    Real &physical_time_;
 
   public:
     SimBodyStatesIO(SPHSystem &sph_system, SimTK::RungeKuttaMersonIntegrator &integ,
                     MobilizedBodyType &mobody)
-        : io_environment_(sph_system.getIOEnvironment()), integ_(integ), mobody_(mobody){};
+        : io_environment_(sph_system.getIOEnvironment()), integ_(integ), mobody_(mobody),
+          physical_time_(*sph_system.getSystemVariableDataByName<Real>("PhysicalTime")){};
     virtual ~SimBodyStatesIO(){};
 };
 
@@ -147,3 +150,4 @@ class WriteSimBodyVelocity : public WriteSimBodyStates<SimTK::MobilizedBody::Fre
     virtual void writeToFile(size_t iteration_step = 0) override;
 };
 } // namespace SPH
+#endif // IO_SIMBODY_H

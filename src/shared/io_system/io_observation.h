@@ -26,7 +26,8 @@
  * @author	Chi Zhang, Shuoguo Zhang, Zhenxi Zhao and Xiangyu Hu
  */
 
-#pragma once
+#ifndef IO_OBSERVATION_H
+#define IO_OBSERVATION_H
 
 #include "io_base.h"
 
@@ -34,13 +35,13 @@
 
 namespace SPH
 {
-/**
- * @class ObservedQuantityRecording
- * @brief write files for observed quantity
- */
+
+template <typename...>
+class ObservedQuantityRecording;
+
 template <typename VariableType>
-class ObservedQuantityRecording : public BodyStatesRecording,
-                                  public ObservingAQuantity<VariableType>
+class ObservedQuantityRecording<VariableType> : public BodyStatesRecording,
+                                                public ObservingAQuantity<VariableType>
 {
   protected:
     SPHBody &observer_;
@@ -67,10 +68,10 @@ class ObservedQuantityRecording : public BodyStatesRecording,
         std::ofstream out_file(filefullpath_output_.c_str(), std::ios::app);
         out_file << "run_time"
                  << "   ";
-        for (size_t i = 0; i != base_particles_.total_real_particles_; ++i)
+        for (size_t i = 0; i != base_particles_.TotalRealParticles(); ++i)
         {
             std::string quantity_name_i = quantity_name + "[" + std::to_string(i) + "]";
-            plt_engine_.writeAQuantityHeader(out_file, (*this->interpolated_quantities_)[i], quantity_name_i);
+            plt_engine_.writeAQuantityHeader(out_file, this->interpolated_quantities_[i], quantity_name_i);
         }
         out_file << "\n";
         out_file.close();
@@ -81,27 +82,29 @@ class ObservedQuantityRecording : public BodyStatesRecording,
     {
         this->exec();
         std::ofstream out_file(filefullpath_output_.c_str(), std::ios::app);
-        out_file << GlobalStaticVariables::physical_time_ << "   ";
-        for (size_t i = 0; i != base_particles_.total_real_particles_; ++i)
+        out_file << sv_physical_time_.getValue() << "   ";
+        for (size_t i = 0; i != base_particles_.TotalRealParticles(); ++i)
         {
-            plt_engine_.writeAQuantity(out_file, (*this->interpolated_quantities_)[i]);
+            plt_engine_.writeAQuantity(out_file, this->interpolated_quantities_[i]);
         }
         out_file << "\n";
         out_file.close();
     };
 
-    StdLargeVec<VariableType> *getObservedQuantity()
+    VariableType *getObservedQuantity()
     {
         return this->interpolated_quantities_;
     }
 };
 
+template <typename...>
+class ReducedQuantityRecording;
 /**
  * @class ReducedQuantityRecording
  * @brief write reduced quantity of a body
  */
 template <class LocalReduceMethodType>
-class ReducedQuantityRecording : public BaseIO
+class ReducedQuantityRecording<LocalReduceMethodType> : public BaseIO
 {
   protected:
     PltEngine plt_engine_;
@@ -112,7 +115,7 @@ class ReducedQuantityRecording : public BaseIO
 
   public:
     /*< deduce variable type from reduce method. */
-    using VariableType = typename LocalReduceMethodType::ReduceReturnType;
+    using VariableType = typename LocalReduceMethodType::ReturnType;
     VariableType type_indicator_; /*< this is an indicator to identify the variable type. */
 
   public:
@@ -137,10 +140,11 @@ class ReducedQuantityRecording : public BaseIO
     virtual void writeToFile(size_t iteration_step = 0) override
     {
         std::ofstream out_file(filefullpath_output_.c_str(), std::ios::app);
-        out_file << GlobalStaticVariables::physical_time_ << "   ";
+        out_file << sv_physical_time_.getValue() << "   ";
         plt_engine_.writeAQuantity(out_file, reduce_method_.exec());
         out_file << "\n";
         out_file.close();
     };
 };
 } // namespace SPH
+#endif // IO_OBSERVATION_H

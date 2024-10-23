@@ -38,7 +38,7 @@ namespace SPH
  * @brief pre-claimed class.
  */
 class SPHSystem;
-class SolidParticles;
+class BaseParticles;
 /**
  * @class SolidBody
  * @brief Declaration of solid body which is used for Solid BCs and derived from RealBody.
@@ -72,12 +72,14 @@ class SolidBodyPartForSimbody : public BodyRegionByParticle
     Vecd initial_mass_center_;
     SimTK::MassProperties *body_part_mass_properties_;
 
-    SolidBodyPartForSimbody(SPHBody &body, SharedPtr<Shape> initial_shape_ptr);
+    SolidBodyPartForSimbody(SPHBody &body, Shape &body_part_shape);
+    SolidBodyPartForSimbody(SPHBody &body, SharedPtr<Shape> shape_ptr);
     virtual ~SolidBodyPartForSimbody(){};
 
   protected:
-    Real solid_body_density_;
-    SolidParticles *solid_particles_;
+    Real rho0_;
+    Real *Vol_;
+    Vecd *pos_;
 
   private:
     void setMassProperties();

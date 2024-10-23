@@ -41,8 +41,7 @@ class SurfaceShape;
 
 namespace relax_dynamics
 {
-class ShapeSurfaceBounding2 : public LocalDynamics,
-                              public RelaxDataDelegateSimple
+class ShapeSurfaceBounding2 : public LocalDynamics
 {
   public:
     ShapeSurfaceBounding2(RealBody &real_body_);
@@ -50,7 +49,7 @@ class ShapeSurfaceBounding2 : public LocalDynamics,
     void update(size_t index_i, Real dt = 0.0);
 
   protected:
-    StdLargeVec<Vecd> &pos_;
+    Vecd *pos_;
     Shape *shape_;
 };
 
@@ -86,7 +85,7 @@ class RelaxationStepInnerSecondHalf : public BaseDynamics<void>
  * @class SurfaceNormalDirection
  * @brief get the normal direction of surface particles.
  */
-class SurfaceNormalDirection : public RelaxDataDelegateSimple, public LocalDynamics
+class SurfaceNormalDirection : public LocalDynamics
 {
   public:
     explicit SurfaceNormalDirection(SPHBody &sph_body);
@@ -95,21 +94,7 @@ class SurfaceNormalDirection : public RelaxDataDelegateSimple, public LocalDynam
 
   protected:
     SurfaceShape *surface_shape_;
-    StdLargeVec<Vecd> &pos_, &n_;
-};
-
-/**@class ConstrainSuefaceBodyRegion
- * @brief Fix the position surafce body part.
- */
-class ConstrainSurfaceBodyRegion : public BaseLocalDynamics<BodyPartByParticle>, public RelaxDataDelegateSimple
-{
-  public:
-    ConstrainSurfaceBodyRegion(BodyPartByParticle &body_part);
-    virtual ~ConstrainSurfaceBodyRegion(){};
-    void update(size_t index_i, Real dt = 0.0);
-
-  protected:
-    StdLargeVec<Vecd> &force_;
+    Vecd *pos_, *n_;
 };
 
 } // namespace relax_dynamics

@@ -29,6 +29,9 @@ Vec3d domain_upper_bound(15.0, 15.0, 26.0);
 //	Domain bounds of the system.
 //----------------------------------------------------------------------
 BoundingBox system_domain_bounds(domain_lower_bound, domain_upper_bound);
+
+namespace SPH
+{
 /** Define the boundary geometry. */
 class BoundaryGeometry : public BodyPartByParticle
 {
@@ -51,13 +54,16 @@ class BoundaryGeometry : public BodyPartByParticle
     };
 };
 
-class CylinderParticleGenerator : public ParticleGeneratorSurface
+class Leaflet;
+template <>
+class ParticleGenerator<SurfaceParticles, Leaflet> : public ParticleGenerator<SurfaceParticles>
 {
   public:
-    explicit CylinderParticleGenerator(SPHBody &sph_body) : ParticleGeneratorSurface(sph_body), sph_body_(sph_body){};
-    virtual void initializeGeometricVariables() override
+    explicit ParticleGenerator(SPHBody &sph_body, SurfaceParticles &surface_particles)
+        : ParticleGenerator<SurfaceParticles>(sph_body, surface_particles), sph_body_(sph_body){};
+    virtual void prepareGeometricData() override
     {
-        SurfaceShape *a = dynamic_cast<SurfaceShape *>(sph_body_.initial_shape_);
+        SurfaceShape *a = DynamicCast<SurfaceShape>(this, &sph_body_.getInitialShape());
 
         Standard_Real u1 = 0;
         Standard_Real v1 = DELTA1;
@@ -104,13 +110,14 @@ class CylinderParticleGenerator : public ParticleGeneratorSurface
 
         for (int i = 0; i != (int)points.size(); i++)
         {
-            initializePositionAndVolumetricMeasure(points[i], particle_spacing_ref * particle_spacing_ref);
+            addPositionAndVolumetricMeasure(points[i], particle_spacing_ref * particle_spacing_ref);
             Vecd n_0 = Vec3d(1.0, 1.0, 1.0);
-            initializeSurfaceProperties(n_0, thickness);
+            addSurfaceProperties(n_0, thickness);
         }
     }
     SPHBody &sph_body_;
 };
+} // namespace SPH
 
 //--------------------------------------------------------------------------
 //	Main program starts here.
@@ -127,12 +134,12 @@ int main(int ac, char *av[])
     //----------------------------------------------------------------------
     SolidBody leaflet(sph_system, makeShared<SurfaceShapeSTEP>(full_path_to_geometry, "Leaflet"));
     // here dummy linear elastic solid is use because no solid dynamics in particle relaxation
-    leaflet.defineParticlesAndMaterial<ShellParticles, SaintVenantKirchhoffSolid>(1.0, 1.0, 0.0);
-    leaflet.generateParticles<CylinderParticleGenerator>();
+    leaflet.defineMaterial<Solid>();
+    leaflet.generateParticles<SurfaceParticles, Leaflet>();
     //----------------------------------------------------------------------
     //	Define simple file input and outputs functions.
     //----------------------------------------------------------------------
-    BodyStatesRecordingToVtp write_relaxed_particles(sph_system.real_bodies_);
+    BodyStatesRecordingToVtp write_relaxed_particles(sph_system);
     MeshRecordingToPlt write_mesh_cell_linked_list(sph_system, leaflet.getCellLinkedList());
     //----------------------------------------------------------------------
     //	Define body relation map.
@@ -151,7 +158,6 @@ int main(int ac, char *av[])
     RelaxationStepInnerSecondHalf leaflet_relaxation_second_half(leaflet_inner);
     /** Constrain the boundary. */
     BoundaryGeometry boundary_geometry(leaflet, "BoundaryGeometry");
-    SimpleDynamics<ConstrainSurfaceBodyRegion> constrain_holder(boundary_geometry);
     SimpleDynamics<SurfaceNormalDirection> surface_normal_direction(leaflet);
     //----------------------------------------------------------------------
     //	Particle relaxation starts here.
@@ -167,7 +173,6 @@ int main(int ac, char *av[])
     while (ite < relax_step)
     {
         leaflet_relaxation_first_half.exec();
-        constrain_holder.exec();
         leaflet_relaxation_second_half.exec();
         ite += 1;
         if (ite % 100 == 0)

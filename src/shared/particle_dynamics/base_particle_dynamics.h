@@ -35,28 +35,10 @@
 #include "base_body.h"
 #include "base_data_package.h"
 #include "neighborhood.h"
-#include "sph_data_containers.h"
-
-#include <functional>
-
-using namespace std::placeholders;
+#include "sphinxsys_containers.h"
 
 namespace SPH
 {
-/**
- * @class GlobalStaticVariables
- * @brief A place to put all global variables
- */
-class GlobalStaticVariables
-{
-  public:
-    explicit GlobalStaticVariables(){};
-    virtual ~GlobalStaticVariables(){};
-
-    /** the physical time is global value for all dynamics */
-    static inline Real physical_time_ = 0.0;
-};
-
 /**
  * @class BaseDynamics
  * @brief The base class for all dynamics
@@ -64,18 +46,17 @@ class GlobalStaticVariables
  * for all dynamics. An specific implementation should be realized.
  */
 template <class ReturnType = void>
-class BaseDynamics : public GlobalStaticVariables
+class BaseDynamics
 {
   public:
-    BaseDynamics(SPHBody &sph_body)
-        : sph_body_(sph_body), is_newly_updated_(false){};
-    virtual ~BaseDynamics(){};
+    BaseDynamics() : is_newly_updated_(false) {};
+    virtual ~BaseDynamics() {};
     bool checkNewlyUpdated() { return is_newly_updated_; };
     void setNotNewlyUpdated() { is_newly_updated_ = false; };
 
-    void setUpdated()
+    void setUpdated(SPHBody &sph_body)
     {
-        sph_body_.setNewlyUpdated();
+        sph_body.setNewlyUpdated();
         is_newly_updated_ = true;
     };
 
@@ -83,58 +64,22 @@ class BaseDynamics : public GlobalStaticVariables
     virtual ReturnType exec(Real dt = 0.0) = 0;
 
   private:
-    SPHBody &sph_body_;
     bool is_newly_updated_;
-};
-
-/**
- * @class DataDelegateBase
- * @brief empty base class for mixin template.
- */
-class DataDelegateEmptyBase
-{
-  public:
-    explicit DataDelegateEmptyBase(SPHBody &sph_body){};
-    virtual ~DataDelegateEmptyBase(){};
-};
-
-/**
- * @class DataDelegateSimple
- * @brief prepare data for simple particle dynamics.
- */
-template <class ParticlesType = BaseParticles>
-class DataDelegateSimple
-{
-  public:
-    explicit DataDelegateSimple(SPHBody &sph_body)
-        : particles_(DynamicCast<ParticlesType>(this, &sph_body.getBaseParticles())),
-          sorted_id_(sph_body.getBaseParticles().sorted_id_),
-          unsorted_id_(sph_body.getBaseParticles().unsorted_id_){};
-    virtual ~DataDelegateSimple(){};
-    ParticlesType *getParticles() { return particles_; };
-
-  protected:
-    ParticlesType *particles_;
-    StdLargeVec<size_t> &sorted_id_;
-    StdLargeVec<size_t> &unsorted_id_;
 };
 
 /**
  * @class DataDelegateInner
  * @brief prepare data for inner particle dynamics
  */
-template <class ParticlesType = BaseParticles,
-          class BaseDataDelegateType = DataDelegateSimple<ParticlesType>>
-class DataDelegateInner : public BaseDataDelegateType
+class DataDelegateInner
 {
     BaseInnerRelation &inner_relation_;
 
   public:
     explicit DataDelegateInner(BaseInnerRelation &inner_relation)
-        : BaseDataDelegateType(inner_relation.getSPHBody()),
-          inner_relation_(inner_relation),
-          inner_configuration_(inner_relation.inner_configuration_){};
-    virtual ~DataDelegateInner(){};
+        : inner_relation_(inner_relation),
+          inner_configuration_(inner_relation.inner_configuration_) {};
+    virtual ~DataDelegateInner() {};
     BaseInnerRelation &getBodyRelation() { return inner_relation_; };
 
   protected:
@@ -146,22 +91,28 @@ class DataDelegateInner : public BaseDataDelegateType
  * @class DataDelegateContact
  * @brief prepare data for contact particle dynamics
  */
-template <class ParticlesType = BaseParticles,
-          class ContactParticlesType = BaseParticles,
-          class BaseDataDelegateType = DataDelegateSimple<ParticlesType>>
-class DataDelegateContact : public BaseDataDelegateType
+class DataDelegateContact
 {
     BaseContactRelation &contact_relation_;
 
   public:
-    explicit DataDelegateContact(BaseContactRelation &contact_relation);
-    virtual ~DataDelegateContact(){};
-    void addExtraContactRelation(SPHBody &this_body, BaseContactRelation &extra_contact_relation);
+    explicit DataDelegateContact(BaseContactRelation &contact_relation)
+        : contact_relation_(contact_relation)
+    {
+        RealBodyVector contact_sph_bodies = contact_relation.contact_bodies_;
+        for (size_t i = 0; i != contact_sph_bodies.size(); ++i)
+        {
+            contact_bodies_.push_back(contact_sph_bodies[i]);
+            contact_particles_.push_back(&contact_sph_bodies[i]->getBaseParticles());
+            contact_configuration_.push_back(&contact_relation.contact_configuration_[i]);
+        }
+    };
+    virtual ~DataDelegateContact() {};
     BaseContactRelation &getBodyRelation() { return contact_relation_; };
 
   protected:
     SPHBodyVector contact_bodies_;
-    StdVec<ContactParticlesType *> contact_particles_;
+    StdVec<BaseParticles *> contact_particles_;
     /** Configurations for particle interaction between bodies. */
     StdVec<ParticleConfiguration *> contact_configuration_;
 };
