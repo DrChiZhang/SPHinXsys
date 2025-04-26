@@ -43,6 +43,8 @@
 #if SPHINXSYS_USE_SYCL
 #include <CL/sycl.hpp>
 #define SYCL_DEVICE_ONLY
+#else
+#include <boost/atomic/atomic_ref.hpp>
 #endif // SPHINXSYS_USE_SYCL
 
 #include <Eigen/Cholesky>
@@ -53,6 +55,18 @@
 
 namespace SPH
 {
+#if SPHINXSYS_USE_SYCL
+template <typename T>
+using AtomicRef = sycl::atomic_ref<
+    T, sycl::memory_order_relaxed, sycl::memory_scope_device,
+    sycl::access::address_space::global_space>;
+namespace math = sycl;
+#else
+template <typename T>
+using AtomicRef = boost::atomic_ref<T>;
+namespace math = std;
+#endif // SPHINXSYS_USE_SYCL
+
 #if SPHINXSYS_USE_FLOAT
 using Real = float;
 using UnsignedInt = u_int32_t;
@@ -67,9 +81,19 @@ using Array3i = Eigen::Array<int, 3, 1>;
 /** Vector with float point number.*/
 using Vec2d = Eigen::Matrix<Real, 2, 1>;
 using Vec3d = Eigen::Matrix<Real, 3, 1>;
-/** Small, 2*2 and 3*3, matrix with float point number. */
+using Vec6d = Eigen::Matrix<Real, 6, 1>;
+/** Small 2*2, 3*3, 4*4 and 6*6 matrix with float point number. */
 using Mat2d = Eigen::Matrix<Real, 2, 2>;
 using Mat3d = Eigen::Matrix<Real, 3, 3>;
+using Mat6d = Eigen::Matrix<Real, 6, 6>;
+
+/** More complex matrix with float point number for tensor operations. */
+using VecMat2d = Vec3d;
+using VecMat3d = Vec6d;
+using MatTen2d = Mat3d;
+using MatTen3d = Mat6d;
+using VecMatGrad2d = Eigen::Matrix<Real, 3, 2>;
+using VecMatGrad3d = Eigen::Matrix<Real, 6, 3>;
 /** Dynamic matrix*/
 using MatXd = Eigen::Matrix<Real, Eigen::Dynamic, Eigen::Dynamic>;
 
@@ -77,35 +101,43 @@ using MatXd = Eigen::Matrix<Real, Eigen::Dynamic, Eigen::Dynamic>;
 template <typename DataType>
 struct ZeroData
 {
-    static inline DataType value = DataType::Zero();
+    static inline const DataType value = DataType::Zero();
 };
 
 template <>
 struct ZeroData<bool>
 {
-    static inline bool value = false;
+    static inline const bool value = false;
 };
 template <>
 struct ZeroData<Real>
 {
-    static inline Real value = Real(0);
+    static inline const Real value = Real(0);
 };
 template <>
 struct ZeroData<int>
 {
-    static inline int value = 0;
+    static inline const int value = 0;
 };
 
 template <>
 struct ZeroData<UnsignedInt>
 {
-    static inline UnsignedInt value = 0;
+    static inline const UnsignedInt value = 0;
+};
+
+template <typename FirstType, typename SecondType>
+struct ZeroData<std::pair<FirstType, SecondType>>
+{
+    using PairType = std::pair<FirstType, SecondType>;
+    static inline const PairType value = PairType(
+        ZeroData<FirstType>::value, ZeroData<SecondType>::value);
 };
 
 template <typename DataType>
 struct IdentityMatrix
 {
-    static inline DataType value = DataType::Identity();
+    static inline const DataType value = DataType::Identity();
 };
 
 /** Type trait for data type index. */
@@ -150,6 +182,26 @@ struct DataTypeIndex<Mat3d>
     static constexpr int value = 6;
 };
 
+template <>
+struct DataTypeIndex<Vec6d>
+{
+    static constexpr int value = 7;
+};
+template <>
+struct DataTypeIndex<Mat6d>
+{
+    static constexpr int value = 8;
+};
+template <>
+struct DataTypeIndex<VecMatGrad2d>
+{
+    static constexpr int value = 9;
+};
+template <>
+struct DataTypeIndex<VecMatGrad3d>
+{
+    static constexpr int value = 10;
+};
 /** Verbal boolean for positive and negative axis directions. */
 const int xAxis = 0;
 const int yAxis = 1;

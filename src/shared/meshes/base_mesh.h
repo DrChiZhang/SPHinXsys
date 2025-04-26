@@ -58,7 +58,7 @@ class Mesh
   public:
     Mesh(BoundingBox tentative_bounds, Real grid_spacing, size_t buffer_width);
     Mesh(Vecd mesh_lower_bound, Real grid_spacing, Arrayi all_grid_points);
-    ~Mesh(){};
+    ~Mesh() {};
 
     Vecd MeshLowerBound() const { return mesh_lower_bound_; };
     Real GridSpacing() const { return grid_spacing_; };
@@ -149,67 +149,12 @@ class BaseMeshField
     std::string name_{};
 
   public:
-    explicit BaseMeshField(const std::string &name) : name_(name){};
-    virtual ~BaseMeshField(){};
+    explicit BaseMeshField(const std::string &name) : name_(name) {};
+    virtual ~BaseMeshField() {};
     /** Return the mesh field name. */
     std::string Name() { return name_; };
     /** output mesh data for Tecplot visualization */
-    virtual void writeMeshFieldToPlt(std::ofstream &output_file) = 0;
-};
-
-/**
- * @class 	RefinedMesh
- * @brief 	Abstract base class derived from the coarse mesh but has double resolution.
- */
-template <class CoarseMeshType>
-class RefinedMesh;
-
-/**
- * @class 	MultilevelMesh
- * @brief 	Multi-level Meshes with successively double the resolution
- */
-template <class MeshFieldType, class CoarsestMeshType>
-class MultilevelMesh : public MeshFieldType
-{
-  public:
-    /**template parameter pack is used with rvalue reference and perfect forwarding to keep
-     * the type of arguments when called by another function with template parameter pack too. */
-    template <typename... Args>
-    MultilevelMesh(BoundingBox tentative_bounds, Real reference_spacing, size_t total_levels, Args &&...args)
-        : MeshFieldType(std::forward<Args>(args)...), total_levels_(total_levels)
-    {
-        mesh_levels_.push_back(
-            mesh_level_ptr_vector_keeper_
-                .template createPtr<CoarsestMeshType>(tentative_bounds, reference_spacing, std::forward<Args>(args)...));
-
-        for (size_t level = 1; level != total_levels_; ++level)
-        {
-            /** all mesh levels aligned at the lower bound of tentative_bounds */
-            mesh_levels_.push_back(
-                mesh_level_ptr_vector_keeper_
-                    .template createPtr<RefinedMesh<CoarsestMeshType>>(tentative_bounds, *mesh_levels_.back(), std::forward<Args>(args)...));
-        }
-    };
-    virtual ~MultilevelMesh(){};
-
-  private:
-    UniquePtrsKeeper<CoarsestMeshType> mesh_level_ptr_vector_keeper_;
-
-  protected:
-    size_t total_levels_;                    /**< level 0 is the coarsest */
-    StdVec<CoarsestMeshType *> mesh_levels_; /**< Mesh in different coarse level. */
-
-  public:
-    /** Return the mesh at different level. */
-    StdVec<CoarsestMeshType *> getMeshLevels() { return mesh_levels_; };
-    /** Write mesh data to file. */
-    void writeMeshFieldToPlt(std::ofstream &output_file) override
-    {
-        for (size_t l = 0; l != total_levels_; ++l)
-        {
-            mesh_levels_[l]->writeMeshFieldToPlt(output_file);
-        }
-    }
+    virtual void writeMeshFieldToPlt(const std::string &partial_file_name) = 0;
 };
 } // namespace SPH
 #endif // BASE_MESH_H

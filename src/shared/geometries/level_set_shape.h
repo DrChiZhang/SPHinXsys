@@ -45,7 +45,7 @@ class SPHSystem;
 class LevelSetShape : public Shape
 {
   private:
-    UniquePtrKeeper<BaseLevelSet> level_set_keeper_;
+    UniquePtrKeeper<MultilevelLevelSet> level_set_keeper_;
     SharedPtr<SPHAdaptation> sph_adaptation_;
 
   public:
@@ -61,6 +61,7 @@ class LevelSetShape : public Shape
     Vecd findLevelSetGradient(const Vecd &probe_point);
     Real computeKernelIntegral(const Vecd &probe_point, Real h_ratio = 1.0);
     Vecd computeKernelGradientIntegral(const Vecd &probe_point, Real h_ratio = 1.0);
+    Matd computeKernelSecondGradientIntegral(const Vecd& probe_point, Real h_ratio = 1.0);
     /** small_shift_factor = 1.0 by default, can be increased for difficult geometries for smoothing */
     LevelSetShape *cleanLevelSet(Real small_shift_factor = 1.0);
     /** required to build level set from triangular mesh in stl file format. */
@@ -68,7 +69,7 @@ class LevelSetShape : public Shape
     void writeLevelSet(SPHSystem &sph_system);
 
   protected:
-    BaseLevelSet &level_set_; /**< narrow bounded level set mesh. */
+    MultilevelLevelSet &level_set_; /**< narrow bounded level set mesh. */
 
     virtual BoundingBox findBounds() override;
 };

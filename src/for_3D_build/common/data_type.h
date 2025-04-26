@@ -37,6 +37,9 @@ namespace SPH
 using Arrayi = Array3i;
 using Vecd = Vec3d;
 using Matd = Mat3d;
+using VecMatd = Vec6d;           // vectorized symmetric 3x3 matrix
+using MatTend = Mat6d;           // matricized symmetric 3x3x3x3 tensor
+using VecMatGrad = VecMatGrad3d; // gradient of vectorized symmetric 3x3 matrix
 using AngularVecd = Vec3d;
 using Rotation = Rotation3d;
 using BoundingBox = BaseBoundingBox<Vec3d>;
@@ -61,7 +64,9 @@ const Matd reduced_unit_matrix{
 /** initial local normal, only works for thin structure dynamics. */
 const Vecd local_pseudo_n_0 = Vecd(0.0, 0.0, 1.0);
 const Vecd local_pseudo_b_n_0 = Vecd(0.0, 1.0, 0.0);
-
 const Vecd ZeroVecd = Vec3d::Zero();
+
+inline Vecd degradeToVecd(const Vec3d &input) { return input; };
+inline Matd degradeToMatd(const Mat3d &input) { return input; };
 } // namespace SPH
 #endif // DATA_TYPE_3D_H
